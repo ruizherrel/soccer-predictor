@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import requests
 
@@ -26,14 +27,16 @@ logger = logging.getLogger(__name__)
 BASE_URL = "https://www.football-data.co.uk/mmz4281/{season}/{league}.csv"
 
 # datasets/football-datasets only covers these five leagues (one directory
-# per league, not a generic code like football-data.co.uk's). Extend this
-# map if the project ever grows beyond the Premier League.
+# per league, not a generic code like football-data.co.uk's). Folder names
+# verified directly against the repo (github.com/datasets/football-datasets)
+# since they don't follow a guessable pattern. Extend this map if the
+# project ever grows beyond these five.
 GITHUB_MIRROR_LEAGUE_SLUGS = {
     "E0": "premier-league",
-    "SP1": "spanish-la-liga",
-    "I1": "italian-serie-a",
-    "D1": "german-bundesliga",
-    "F1": "french-ligue-1",
+    "SP1": "la-liga",
+    "I1": "serie-a",
+    "D1": "bundesliga",
+    "F1": "ligue-1",
 }
 GITHUB_MIRROR_URL = (
     "https://raw.githubusercontent.com/datasets/football-datasets/main/"
@@ -85,7 +88,7 @@ def _candidate_urls(season: str, league: str) -> list[str]:
     return urls
 
 
-def fetch_raw_season_csv(season: str, league: str = config.LEAGUE_CODE) -> pd.DataFrame:
+def fetch_raw_season_csv(season: str, league: str) -> pd.DataFrame:
     """Download one season's raw match CSV and normalize its columns.
 
     Tries football-data.co.uk first, then the GitHub mirror if that fails
@@ -133,37 +136,105 @@ def _raw_cache_path(season: str, league: str) -> Path:
     return config.DATA_RAW / f"{league}_{season}.parquet"
 
 
-def refresh(seasons: list[str] | None = None, league: str = config.LEAGUE_CODE) -> pd.DataFrame:
-    """Fetch all configured seasons, caching completed ones and always
-    re-fetching the most recent (in-progress) season. Returns the combined,
-    deduplicated match table and writes it to config.MATCHES_PATH.
+MEXICO_MIRROR_URL = (
+    "https://raw.githubusercontent.com/footballcsv/cache.footballdata/master/{folder}/mx.1.csv"
+)
+
+
+def _mx_pseudo_season(date: pd.Timestamp) -> str:
+    """Liga MX plays two short tournaments a year (Apertura Jul-Dec,
+    Clausura Jan-Jun) instead of one Aug-May season, so the source's
+    per-year-folder grouping doesn't match a real competitive boundary.
+    Splitting by calendar month keeps the Elo/Pi/Poisson season-regression
+    logic (which assumes squads reset between "seasons") meaningful."""
+    return f"{date.year}A" if date.month >= 7 else f"{date.year}C"
+
+
+def fetch_raw_mexico_folder(folder: str) -> pd.DataFrame:
+    """Download one footballcsv/cache.footballdata season folder for Mexico
+    (mx.1.csv). This mirror uses a different schema than football-data.co.uk
+    (no FTR/odds columns, "Team 1"/"FT"/"Team 2" instead) and ships CRLF line
+    endings, so every field needs stripping or team names silently fork on
+    a trailing '\\r'."""
+    from io import StringIO
+
+    url = MEXICO_MIRROR_URL.format(folder=folder)
+    resp = requests.get(url, timeout=30)
+    resp.raise_for_status()
+    raw = pd.read_csv(StringIO(resp.content.decode("utf-8-sig")), dtype=str)
+    raw.columns = [c.strip() for c in raw.columns]
+    for col in raw.columns:
+        raw[col] = raw[col].str.strip()
+
+    scores = raw["FT"].str.split("-", n=1, expand=True)
+    home_goals = scores[0].astype(int)
+    away_goals = scores[1].astype(int)
+    result = np.where(home_goals > away_goals, "H", np.where(home_goals < away_goals, "A", "D"))
+
+    df = pd.DataFrame(
+        {
+            "date": pd.to_datetime(raw["Date"], format="%a %b %d %Y"),
+            "home_team": raw["Team 1"].map(normalize_team),
+            "away_team": raw["Team 2"].map(normalize_team),
+            "home_goals": home_goals,
+            "away_goals": away_goals,
+            "result": result,
+        }
+    )
+    df["season"] = df["date"].map(_mx_pseudo_season)
+    return df.sort_values("date").reset_index(drop=True)
+
+
+def refresh(league: str) -> pd.DataFrame:
+    """Fetch all configured seasons for `league`, caching completed ones and
+    always re-fetching the most recent (in-progress) one. Returns the
+    combined, deduplicated match table and writes it to
+    config.matches_path(league).
     """
-    seasons = seasons or config.SEASONS
-    current_season = seasons[-1]
+    source = config.LEAGUES[league]["source"]
     frames = []
 
-    for season in seasons:
-        cache_path = _raw_cache_path(season, league)
-        if season != current_season and cache_path.exists():
-            logger.info("Using cached season %s", season)
-            frames.append(pd.read_parquet(cache_path))
-            continue
+    if source == "football-data":
+        seasons = config.SEASONS
+        current_season = seasons[-1]
+        for season in seasons:
+            cache_path = _raw_cache_path(season, league)
+            if season != current_season and cache_path.exists():
+                logger.info("Using cached season %s", season)
+                frames.append(pd.read_parquet(cache_path))
+                continue
 
-        logger.info("Downloading season %s", season)
-        df = fetch_raw_season_csv(season, league)
-        df.to_parquet(cache_path, index=False)
-        frames.append(df)
+            logger.info("Downloading season %s", season)
+            df = fetch_raw_season_csv(season, league)
+            df.to_parquet(cache_path, index=False)
+            frames.append(df)
+    elif source == "footballcsv-mx":
+        for folder in config.MEXICO_SEASON_FOLDERS:
+            cache_path = _raw_cache_path(folder, league)
+            if cache_path.exists():
+                logger.info("Using cached season %s", folder)
+                frames.append(pd.read_parquet(cache_path))
+                continue
+
+            logger.info("Downloading season %s", folder)
+            df = fetch_raw_mexico_folder(folder)
+            df.to_parquet(cache_path, index=False)
+            frames.append(df)
+    else:
+        raise ValueError(f"Unknown data source {source!r} for league {league!r}")
 
     combined = pd.concat(frames, ignore_index=True)
     combined = combined.drop_duplicates(subset=["date", "home_team", "away_team"])
     combined = combined.sort_values("date").reset_index(drop=True)
 
-    combined.to_parquet(config.MATCHES_PATH, index=False)
-    logger.info("Wrote %d matches to %s", len(combined), config.MATCHES_PATH)
+    matches_path = config.matches_path(league)
+    combined.to_parquet(matches_path, index=False)
+    logger.info("Wrote %d matches to %s", len(combined), matches_path)
     return combined
 
 
-def load_matches() -> pd.DataFrame:
-    if not config.MATCHES_PATH.exists():
-        return refresh()
-    return pd.read_parquet(config.MATCHES_PATH)
+def load_matches(league: str) -> pd.DataFrame:
+    matches_path = config.matches_path(league)
+    if not matches_path.exists():
+        return refresh(league)
+    return pd.read_parquet(matches_path)

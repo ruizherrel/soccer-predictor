@@ -141,19 +141,20 @@ def build_features(matches: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def build_and_save_features() -> pd.DataFrame:
+def build_and_save_features(league: str) -> pd.DataFrame:
     from . import ingest
 
-    matches = ingest.load_matches()
+    matches = ingest.load_matches(league)
     features = build_features(matches)
-    features.to_parquet(config.FEATURES_PATH, index=False)
+    features.to_parquet(config.features_path(league), index=False)
     return features
 
 
-def load_features() -> pd.DataFrame:
-    if not config.FEATURES_PATH.exists():
-        return build_and_save_features()
-    return pd.read_parquet(config.FEATURES_PATH)
+def load_features(league: str) -> pd.DataFrame:
+    features_path = config.features_path(league)
+    if not features_path.exists():
+        return build_and_save_features(league)
+    return pd.read_parquet(features_path)
 
 
 def build_live_features(

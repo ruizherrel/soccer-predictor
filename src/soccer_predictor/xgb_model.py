@@ -76,10 +76,11 @@ def predict_proba(model: XGBClassifier, df: pd.DataFrame, feature_columns: list[
     return model.predict_proba(df[feature_columns])
 
 
-def save_model(model: XGBClassifier, path=config.MODEL_PATH) -> None:
-    joblib.dump({"model": model, "feature_columns": FEATURE_COLUMNS, "class_order": CLASS_ORDER}, path)
+def save_model(model: XGBClassifier, league: str) -> None:
+    payload = {"model": model, "feature_columns": FEATURE_COLUMNS, "class_order": CLASS_ORDER}
+    joblib.dump(payload, config.model_path(league))
 
 
-def load_model(path=config.MODEL_PATH) -> tuple[XGBClassifier, list[str]]:
-    payload = joblib.load(path)
+def load_model(league: str) -> tuple[XGBClassifier, list[str]]:
+    payload = joblib.load(config.model_path(league))
     return payload["model"], payload["feature_columns"]

@@ -20,21 +20,31 @@ import streamlit as st
 import config
 from soccer_predictor import dataset, ingest, xgb_model
 
-st.set_page_config(page_title="Predictor Premier League", page_icon="⚽")
-st.title("⚽ Predictor de partidos — Premier League")
+st.set_page_config(page_title="Predictor de fútbol", page_icon="⚽")
+st.title("⚽ Predictor de partidos")
 
 
 @st.cache_data(ttl=3600)
-def _load_matches():
-    return ingest.load_matches()
+def _load_matches(league: str):
+    return ingest.load_matches(league)
 
 
 @st.cache_resource
-def _load_model():
-    return xgb_model.load_model()
+def _load_model(league: str):
+    return xgb_model.load_model(league)
 
 
-matches = _load_matches()
+league = st.selectbox(
+    "Liga",
+    options=list(config.LEAGUES),
+    format_func=lambda code: config.LEAGUES[code]["name"],
+)
+
+stale_notice = config.LEAGUES[league].get("stale_notice")
+if stale_notice:
+    st.warning(stale_notice)
+
+matches = _load_matches(league)
 teams = sorted(set(matches["home_team"]) | set(matches["away_team"]))
 
 col1, col2 = st.columns(2)
@@ -47,17 +57,17 @@ if home_team == away_team:
     st.warning("Elige dos equipos distintos.")
     st.stop()
 
-if not config.MODEL_PATH.exists():
+if not config.model_path(league).exists():
     st.error(
-        "No se encontró un modelo entrenado. Corre primero `python scripts/train.py` "
-        "desde la carpeta del proyecto."
+        "No se encontró un modelo entrenado para esta liga. Corre primero "
+        "`python scripts/train.py` desde la carpeta del proyecto."
     )
     st.stop()
 
 if st.button("Predecir", type="primary"):
     with st.spinner("Calculando ratings y probabilidades..."):
         live_row, poisson_model = dataset.build_live_features(matches, home_team, away_team)
-        model, feature_columns = _load_model()
+        model, feature_columns = _load_model(league)
         probs = xgb_model.predict_proba(model, live_row, feature_columns)[0]  # (away, draw, home)
         p_away, p_draw, p_home = probs
 

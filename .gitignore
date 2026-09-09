@@ -3,9 +3,9 @@ __pycache__/
 .pytest_cache/
 data/raw/
 data/processed/*
-!data/processed/matches.parquet
+!data/processed/matches_*.parquet
 models/*.joblib
-!models/xgb_model.joblib
+!models/xgb_model_*.joblib
 .ipynb_checkpoints/
 .venv/
 *.egg-info/
