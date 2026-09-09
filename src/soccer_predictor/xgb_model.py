@@ -18,6 +18,9 @@ FEATURE_COLUMNS = [
     "away_ppg_last5", "away_gf_last5", "away_ga_last5",
     "away_ppg_last10", "away_gf_last10", "away_ga_last10", "away_rest_days",
     "poisson_lambda_home", "poisson_lambda_away",
+    # NaN for every team without a known home-city location (currently:
+    # every non-Mexico team) — XGBoost handles missing values natively.
+    "home_altitude_m", "altitude_delta_m", "away_travel_km",
 ]
 
 # CLASS_ORDER is (away, draw, home); result column is football-data.co.uk's

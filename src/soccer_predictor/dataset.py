@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 
 import config
+from . import geo
 from .elo import EloRatingSystem
 from .form_features import attach_form_features, current_form
 from .pi_ratings import PiRatingSystem
@@ -137,6 +138,18 @@ def build_features(matches: pd.DataFrame) -> pd.DataFrame:
         how="left",
     )
 
+    # Altitude/travel are static per team pair (no match history involved),
+    # so no leakage risk in computing them directly rather than causally.
+    # Appended after the merges above (rather than added to `matches`
+    # upfront) so they don't get swept up by attach_form_features's own
+    # "starts with home_/away_" column-selection, which would otherwise
+    # re-select and duplicate-merge them (pandas then suffixes both copies
+    # _x/_y, silently breaking the plain "home_altitude_m" name).
+    alt_df = pd.DataFrame(
+        [geo.altitude_features(h, a) for h, a in zip(matches["home_team"], matches["away_team"])]
+    )
+    out = pd.concat([out.reset_index(drop=True), alt_df], axis=1)
+
     out["season_index"] = out["season"].map(season_index)
     return out
 
@@ -196,6 +209,7 @@ def build_live_features(
         "away_gf_last10": away_form["gf_last10"],
         "away_ga_last10": away_form["ga_last10"],
         "away_rest_days": away_form["rest_days"],
+        **geo.altitude_features(home_team, away_team),
         "poisson_lambda_home": lam,
         "poisson_lambda_away": mu,
     }

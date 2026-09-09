@@ -16,7 +16,7 @@ for p in (ROOT, ROOT / "src"):
 import pandas as pd  # noqa: E402
 
 import config  # noqa: E402
-from soccer_predictor import backtest, dataset  # noqa: E402
+from soccer_predictor import backtest, dataset, value_betting  # noqa: E402
 
 if __name__ == "__main__":
     pd.set_option("display.float_format", lambda v: f"{v:.4f}")
@@ -37,4 +37,15 @@ if __name__ == "__main__":
 
         print("\nResumen (promedio ponderado por partidos, menor RPS = mejor):")
         print(backtest.summarize(results))
+
+        value_summary, _bets = value_betting.simulate_value_betting(features)
+        if value_summary["n_bets"] > 0:
+            print("\nApuestas de valor (+EV) con Kelly, contra cuotas de cierre Bet365:")
+            print(
+                f"  {value_summary['n_bets']} apuestas | tasa de acierto "
+                f"{value_summary['hit_rate']:.1%} | banca {value_summary['starting_bankroll']:.0f} -> "
+                f"{value_summary['final_bankroll']:.1f} | ROI {value_summary['roi']:+.1%}"
+            )
+        else:
+            print("\nApuestas de valor (+EV): sin cuotas de cierre disponibles para esta liga.")
         print()
