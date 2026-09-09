@@ -242,11 +242,16 @@ def _thesportsdb_round(league_id: str, season: str, round_num: int, retries: int
         resp = requests.get(url, timeout=30)
         if resp.status_code == 200 and resp.text.strip():
             return resp.json().get("events") or []
-        if resp.status_code != 429:
+        # 429 (rate limit) and 5xx (server-side, seen live: 503) are both
+        # transient — retry with backoff. Anything else (404, auth, etc.)
+        # is a real failure, not worth retrying.
+        if resp.status_code != 429 and resp.status_code < 500:
             resp.raise_for_status()
-        logger.info("Rate-limited on round %s of season %s, backing off", round_num, season)
+        logger.info(
+            "TheSportsDB %s on round %s of season %s, backing off", resp.status_code, round_num, season
+        )
         time.sleep(15 * (attempt + 1))
-    raise RuntimeError(f"TheSportsDB kept rate-limiting round {round_num} of season {season} after {retries} retries")
+    raise RuntimeError(f"TheSportsDB kept failing round {round_num} of season {season} after {retries} retries")
 
 
 def _thesportsdb_normalize(league: str, name: str) -> str:

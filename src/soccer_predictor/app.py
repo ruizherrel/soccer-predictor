@@ -5,6 +5,7 @@ Run with: streamlit run src/soccer_predictor/app.py
 """
 from __future__ import annotations
 
+import logging
 import sys
 from pathlib import Path
 
@@ -14,6 +15,7 @@ for _p in (_ROOT, _ROOT / "src"):
         sys.path.insert(0, str(_p))
 
 import numpy as np
+import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
@@ -36,7 +38,16 @@ def _load_model(league: str):
 
 @st.cache_data(ttl=6 * 3600)
 def _load_upcoming_fixtures(league: str):
-    return ingest.fetch_upcoming_fixtures(league)
+    # This is a nice-to-have (tells the user whether the matchup is a real
+    # scheduled fixture) that depends on a third-party API TheSportsDB) with
+    # no uptime guarantee — seen live returning 503s. It must never take
+    # down the actual prediction below it, so any failure here just means
+    # "couldn't check" rather than a crashed page.
+    try:
+        return ingest.fetch_upcoming_fixtures(league)
+    except Exception:
+        logging.getLogger(__name__).exception("fetch_upcoming_fixtures failed for %s", league)
+        return pd.DataFrame(columns=["date", "home_team", "away_team"])
 
 
 league = st.selectbox(
