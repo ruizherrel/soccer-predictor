@@ -71,6 +71,39 @@ MEXICO_TEAM_NAME_MAP: dict[str, str] = {
 def _normalize_mexico_team(name: str) -> str:
     return MEXICO_TEAM_NAME_MAP.get(name, name)
 
+
+# Same issue as Mexico, found the same way: diffed the ~100 distinct names
+# actually returned across all fetched Champions League seasons (36 clubs/
+# season with heavy year-to-year turnover from qualification, so a high
+# raw count is expected — these two are genuine duplicates, not just two
+# different clubs). Checked programmatically for near-duplicates too
+# (accent-insensitive substring), which also flagged "Viking"/"Víkingur
+# Reykjavík" — confirmed those are two different real clubs (Norway vs
+# Iceland) and left unmapped; a substring match alone isn't reliable
+# enough to auto-merge without checking.
+UCL_TEAM_NAME_MAP: dict[str, str] = {
+    "Atletico Madrid": "Atlético Madrid",
+    "Paris SG": "Paris Saint-Germain",
+}
+
+
+def _normalize_ucl_team(name: str) -> str:
+    return UCL_TEAM_NAME_MAP.get(name, name)
+
+
+# Older MLS seasons in TheSportsDB drop the "FC" some clubs added later —
+# found the same way (checked all distinct name pairs for near-duplicates,
+# confirmed these two are the same club rather than a real coincidence).
+MLS_TEAM_NAME_MAP: dict[str, str] = {
+    "New York City": "New York City FC",
+    "Seattle Sounders": "Seattle Sounders FC",
+}
+
+
+def _normalize_mls_team(name: str) -> str:
+    return MLS_TEAM_NAME_MAP.get(name, name)
+
+
 _RAW_COLUMNS = {
     "Date": "date",
     "HomeTeam": "home_team",
@@ -178,14 +211,18 @@ THESPORTSDB_LEAGUE_IDS = {
     "N1": "4337",
     "P1": "4344",
     "MEX": "4350",
+    "MLS": "4346",
+    "UCL": "4480",
 }
 THESPORTSDB_ROUND_URL = (
     "https://www.thesportsdb.com/api/v1/json/{key}/eventsround.php?id={league_id}&r={round_num}&s={season}"
 )
-# Liga MX's regular phase is 17 matchdays (18 teams, single round-robin per
-# tournament); the free key also rate-limits fairly aggressively, so pad a
-# couple of rounds past that and retry 429s with backoff rather than hammer it.
-THESPORTSDB_MAX_ROUNDS = 20
+# High enough to cover MLS (~34 matchdays across 30 teams, some bye weeks);
+# harmless for shorter competitions since the fetch loop breaks on the
+# first empty round regardless (Liga MX stops at ~18, Champions League's
+# league phase at 9). The free key also rate-limits fairly aggressively, so
+# retry 429s with backoff rather than hammer it.
+THESPORTSDB_MAX_ROUNDS = 40
 
 
 def _mx_pseudo_season(date: pd.Timestamp) -> str:
@@ -212,12 +249,23 @@ def _thesportsdb_round(league_id: str, season: str, round_num: int, retries: int
     raise RuntimeError(f"TheSportsDB kept rate-limiting round {round_num} of season {season} after {retries} retries")
 
 
-def fetch_raw_mexico_season(season: str) -> pd.DataFrame:
-    """Download one TheSportsDB season (e.g. "2024-2025") for Liga MX,
-    round by round. A round with zero events ends the regular phase for
-    that season; not-yet-played fixtures (no score yet, relevant for the
-    current in-progress season) are dropped."""
-    league_id = THESPORTSDB_LEAGUE_IDS["MEX"]
+def _thesportsdb_normalize(league: str, name: str) -> str:
+    if league == "MEX":
+        return _normalize_mexico_team(name)
+    if league == "UCL":
+        return _normalize_ucl_team(name)
+    if league == "MLS":
+        return _normalize_mls_team(name)
+    return name
+
+
+def fetch_raw_thesportsdb_season(league: str, season: str) -> pd.DataFrame:
+    """Download one TheSportsDB season for `league`, round by round. A
+    round with zero events ends the competition for that season (its
+    regular/league phase, for Mexico and Champions League — see their
+    config.LEAGUES notes); not-yet-played fixtures (no score yet, relevant
+    for the current in-progress season) are dropped."""
+    league_id = THESPORTSDB_LEAGUE_IDS[league]
     rows = []
     for round_num in range(1, THESPORTSDB_MAX_ROUNDS + 1):
         events = _thesportsdb_round(league_id, season, round_num)
@@ -236,14 +284,17 @@ def fetch_raw_mexico_season(season: str) -> pd.DataFrame:
     df = pd.DataFrame(
         {
             "date": pd.to_datetime([e["dateEvent"] for e in rows]),
-            "home_team": [_normalize_mexico_team(e["strHomeTeam"]) for e in rows],
-            "away_team": [_normalize_mexico_team(e["strAwayTeam"]) for e in rows],
+            "home_team": [_thesportsdb_normalize(league, e["strHomeTeam"]) for e in rows],
+            "away_team": [_thesportsdb_normalize(league, e["strAwayTeam"]) for e in rows],
             "home_goals": home_goals,
             "away_goals": away_goals,
             "result": result,
         }
     )
-    df["season"] = df["date"].map(_mx_pseudo_season)
+    # Only Mexico plays two short tournaments within one source "season"
+    # (Apertura Jul-Dec, Clausura Jan-Jun); everyone else's season slug
+    # already matches one real competitive block.
+    df["season"] = df["date"].map(_mx_pseudo_season) if league == "MEX" else season
     return df.sort_values("date").reset_index(drop=True)
 
 
@@ -286,8 +337,8 @@ def fetch_upcoming_fixtures(league: str, rounds_ahead: int = 2) -> pd.DataFrame:
     if league_id is None:
         return pd.DataFrame(columns=["date", "home_team", "away_team"])
 
-    season = config.MEXICO_SEASONS[-1] if league == "MEX" else _current_thesportsdb_season()
-    normalize = _normalize_mexico_team if league == "MEX" else (lambda n: n)
+    league_seasons = config.LEAGUES[league].get("seasons")
+    season = league_seasons[-1] if league_seasons else _current_thesportsdb_season()
 
     current_round = None
     rows = []
@@ -311,8 +362,8 @@ def fetch_upcoming_fixtures(league: str, rounds_ahead: int = 2) -> pd.DataFrame:
     df = pd.DataFrame(
         {
             "date": pd.to_datetime([e["dateEvent"] for e in rows]),
-            "home_team": [normalize(e["strHomeTeam"]) for e in rows],
-            "away_team": [normalize(e["strAwayTeam"]) for e in rows],
+            "home_team": [_thesportsdb_normalize(league, e["strHomeTeam"]) for e in rows],
+            "away_team": [_thesportsdb_normalize(league, e["strAwayTeam"]) for e in rows],
         }
     )
     return df.sort_values("date").reset_index(drop=True)
@@ -358,7 +409,7 @@ def refresh(league: str) -> pd.DataFrame:
             df.to_parquet(cache_path, index=False)
             frames.append(df)
     elif source == "thesportsdb":
-        seasons = config.MEXICO_SEASONS
+        seasons = config.LEAGUES[league]["seasons"]
         current_season = seasons[-1]
         for season in seasons:
             cache_path = _raw_cache_path(season, league)
@@ -368,7 +419,7 @@ def refresh(league: str) -> pd.DataFrame:
                 continue
 
             logger.info("Downloading season %s", season)
-            df = fetch_raw_mexico_season(season)
+            df = fetch_raw_thesportsdb_season(league, season)
             df.to_parquet(cache_path, index=False)
             frames.append(df)
     else:

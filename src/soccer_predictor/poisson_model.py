@@ -78,12 +78,26 @@ class PoissonGoalModel:
 
         self.known_teams = set(long_df["team"]) | set(long_df["opponent"])
 
-        self.results = smf.glm(
+        glm = smf.glm(
             "goals ~ is_home + C(team) + C(opponent)",
             data=long_df,
             family=sm.families.Poisson(),
             var_weights=weights,
-        ).fit()
+        )
+        try:
+            self.results = glm.fit()
+            if not np.all(np.isfinite(self.results.params)):
+                raise ValueError("non-finite GLM params")
+        except ValueError:
+            # A competition with many teams relative to matches per team
+            # (e.g. Champions League: ~100 distinct clubs across 3 seasons
+            # of 8-match league phases, many appearing in only one season)
+            # can quasi-separate the per-team dummies and blow up plain
+            # MLE. A small ridge penalty (alpha swept empirically against
+            # this exact failure: 0.001 keeps a real, finite team-strength
+            # spread; 1.0 crushes it to near-zero) fixes it without
+            # affecting leagues that never hit this path.
+            self.results = glm.fit_regularized(alpha=0.001, L1_wt=0.0)
 
         # A team unseen in this training window (e.g. promoted after the
         # earliest season in the fold) has no fitted attack/defense dummy,

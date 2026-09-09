@@ -45,9 +45,9 @@ league = st.selectbox(
     format_func=lambda code: config.LEAGUES[code]["name"],
 )
 
-stale_notice = config.LEAGUES[league].get("stale_notice")
-if stale_notice:
-    st.warning(stale_notice)
+notice = config.LEAGUES[league].get("notice")
+if notice:
+    st.warning(notice)
 
 matches = _load_matches(league)
 teams = sorted(set(matches["home_team"]) | set(matches["away_team"]))

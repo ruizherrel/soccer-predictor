@@ -11,10 +11,14 @@ for _dir in (DATA_RAW, DATA_PROCESSED, MODELS_DIR):
 
 # Leagues the app supports. "source" selects the ingest.py code path:
 # - "football-data": football-data.co.uk's per-season CSVs (see SEASONS).
-# - "thesportsdb": TheSportsDB's free API, used for Mexico (see
-#   MEXICO_SEASONS); football-data.co.uk's own Mexico endpoint has a broken
-#   TLS cert chain, and a previously-used GitHub mirror stopped updating in
-#   May 2024.
+# - "thesportsdb": TheSportsDB's free API. Used where football-data.co.uk
+#   either has no coverage at all (Champions League) or its endpoint is
+#   unusable (Mexico/MLS's "extra leagues" endpoint has a broken TLS cert
+#   chain, verified independently; a previously-used GitHub mirror for
+#   Mexico stopped updating in May 2024). Each such league carries its own
+#   "seasons" list, in whatever slug format TheSportsDB expects for it
+#   (confirmed live per league, not assumed) — the last entry is treated as
+#   the current, still-in-progress one and always re-fetched.
 LEAGUES = {
     "E0": {"name": "Premier League (Inglaterra)", "source": "football-data"},
     "SP1": {"name": "La Liga (España)", "source": "football-data"},
@@ -23,7 +27,32 @@ LEAGUES = {
     "F1": {"name": "Ligue 1 (Francia)", "source": "football-data"},
     "N1": {"name": "Eredivisie (Holanda)", "source": "football-data"},
     "P1": {"name": "Primeira Liga (Portugal)", "source": "football-data"},
-    "MEX": {"name": "Liga MX (México)", "source": "thesportsdb"},
+    "MEX": {
+        "name": "Liga MX (México)",
+        "source": "thesportsdb",
+        "seasons": ["2022-2023", "2023-2024", "2024-2025", "2025-2026", "2026-2027"],
+    },
+    "MLS": {
+        "name": "MLS (Estados Unidos)",
+        "source": "thesportsdb",
+        "seasons": ["2022", "2023", "2024", "2025", "2026"],
+    },
+    "UCL": {
+        "name": "UEFA Champions League",
+        "source": "thesportsdb",
+        # Swiss-model league phase only (8 matchdays, single table across
+        # all 36 clubs) started 2024-25; the prior 32-team group-stage
+        # format doesn't fit the same round-by-round fetch, so history
+        # starts here rather than mixing two incompatible formats.
+        "seasons": ["2024-2025", "2025-2026", "2026-2027"],
+        "notice": (
+            "Solo cubre la fase de liga (jornadas 1-8), no la eliminatoria "
+            "posterior (octavos en adelante). Además, al ser una competencia "
+            "con solo 8 partidos por equipo y un grupo de clubes que cambia "
+            "cada temporada por clasificación, los ratings son más ruidosos "
+            "que en una liga doméstica."
+        ),
+    },
 }
 
 # Season codes as used by football-data.co.uk, e.g. "2324" = 2023-24.
@@ -32,12 +61,6 @@ LEAGUES = {
 # by every league with source == "football-data".
 SEASONS = ["1617", "1718", "1819", "1920", "2021", "2122", "2223", "2324", "2425", "2526"]
 WARMUP_SEASONS = 2
-
-# TheSportsDB season slugs available for Mexico. Doesn't cover the post-2023
-# gap the same way as SEASONS above (Liga MX only started appearing cleanly
-# in TheSportsDB's data around 2022-2023); the last entry is treated as the
-# current, still-in-progress season and always re-fetched.
-MEXICO_SEASONS = ["2022-2023", "2023-2024", "2024-2025", "2025-2026", "2026-2027"]
 
 
 def matches_path(league: str) -> Path:

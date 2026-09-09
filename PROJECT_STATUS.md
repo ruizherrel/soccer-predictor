@@ -1,6 +1,6 @@
 # Estado del proyecto — soccer-predictor
 
-Última actualización: 2026-09-09
+Última actualización: 2026-09-09 (sesión ampliada: +Champions League, +MLS)
 
 ## Qué es
 
@@ -20,8 +20,14 @@ App de Streamlit que predice resultados 1X2 (local/empate/visitante) de fútbol 
 | Serie A (Italia) | I1 | ✅ Funcionando | igual que arriba |
 | Ligue 1 (Francia) | F1 | ✅ Funcionando | igual que arriba |
 | Liga MX (México) | MEX | ✅ Funcionando, datos vigentes | TheSportsDB (API gratuita, key `123`), no football-data.co.uk |
+| MLS (Estados Unidos) | MLS | ✅ Funcionando, datos vigentes | TheSportsDB (football-data.co.uk tiene el mismo certificado SSL roto para su endpoint de MLS) |
+| UEFA Champions League | UCL | ✅ Funcionando, con limitaciones (ver abajo) | TheSportsDB (football-data.co.uk no cubre competencias continentales) |
 | Eredivisie (Holanda) | N1 | ⚠️ Pendiente | football-data.co.uk (sin espejo de respaldo configurado) |
 | Primeira Liga (Portugal) | P1 | ⚠️ Pendiente | football-data.co.uk (sin espejo de respaldo configurado) |
+
+**Limitaciones de Champions League**: solo cubre la fase de liga (jornadas 1-8 del formato suizo desde 2024-25), no la eliminatoria (octavos en adelante) — el aviso aparece en la app. Con solo 8 partidos/equipo por temporada y un grupo de clubes que cambia cada año por clasificación (~100 equipos distintos en 3 temporadas, muchos de una sola aparición), el ajuste Poisson normal diverge numéricamente para esta liga — se resolvió con un fallback a regresión regularizada (ridge, alpha=0.001) en `poisson_model.py`, activo solo cuando el ajuste normal falla, sin afectar a las demás ligas.
+
+**Alias de equipo encontrados y corregidos** (mismo patrón que México: TheSportsDB nombra al mismo club distinto entre temporadas): Champions League ("Atletico Madrid"/"Atlético Madrid", "Paris SG"/"Paris Saint-Germain") y MLS ("New York City"/"New York City FC", "Seattle Sounders"/"Seattle Sounders FC") — ver `UCL_TEAM_NAME_MAP` y `MLS_TEAM_NAME_MAP` en `ingest.py`. Si un futuro refresh muestra más equipos de los reales, revisar si hay un alias nuevo sin mapear antes de confiar en los ratings.
 
 **Pendiente de Holanda/Portugal**: football-data.co.uk tiene el certificado SSL roto desde que se armó este proyecto (verificado independientemente con curl/WebFetch/requests). En cuanto se recupere:
 ```
