@@ -11,8 +11,10 @@ for _dir in (DATA_RAW, DATA_PROCESSED, MODELS_DIR):
 
 # Leagues the app supports. "source" selects the ingest.py code path:
 # - "football-data": football-data.co.uk's per-season CSVs (see SEASONS).
-# - "footballcsv-mx": GitHub mirror used for Mexico (see MEXICO_SEASON_FOLDERS);
-#   football-data.co.uk's own Mexico endpoint has a broken TLS cert chain.
+# - "thesportsdb": TheSportsDB's free API, used for Mexico (see
+#   MEXICO_SEASONS); football-data.co.uk's own Mexico endpoint has a broken
+#   TLS cert chain, and a previously-used GitHub mirror stopped updating in
+#   May 2024.
 LEAGUES = {
     "E0": {"name": "Premier League (Inglaterra)", "source": "football-data"},
     "SP1": {"name": "La Liga (España)", "source": "football-data"},
@@ -21,11 +23,7 @@ LEAGUES = {
     "F1": {"name": "Ligue 1 (Francia)", "source": "football-data"},
     "N1": {"name": "Eredivisie (Holanda)", "source": "football-data"},
     "P1": {"name": "Primeira Liga (Portugal)", "source": "football-data"},
-    "MEX": {
-        "name": "Liga MX (México)",
-        "source": "footballcsv-mx",
-        "stale_notice": "Datos disponibles solo hasta mayo 2024 (última actualización de la fuente).",
-    },
+    "MEX": {"name": "Liga MX (México)", "source": "thesportsdb"},
 }
 
 # Season codes as used by football-data.co.uk, e.g. "2324" = 2023-24.
@@ -35,9 +33,11 @@ LEAGUES = {
 SEASONS = ["1617", "1718", "1819", "1920", "2021", "2122", "2223", "2324", "2425", "2526"]
 WARMUP_SEASONS = 2
 
-# footballcsv/cache.footballdata folder names available for Mexico; the
-# mirror stopped updating after the 2023-24 season.
-MEXICO_SEASON_FOLDERS = ["2022-23", "2023-24"]
+# TheSportsDB season slugs available for Mexico. Doesn't cover the post-2023
+# gap the same way as SEASONS above (Liga MX only started appearing cleanly
+# in TheSportsDB's data around 2022-2023); the last entry is treated as the
+# current, still-in-progress season and always re-fetched.
+MEXICO_SEASONS = ["2022-2023", "2023-2024", "2024-2025", "2025-2026", "2026-2027"]
 
 
 def matches_path(league: str) -> Path:
