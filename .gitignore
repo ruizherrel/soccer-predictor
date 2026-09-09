@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+data/raw/
+data/processed/*
+!data/processed/matches.parquet
+models/*.joblib
+!models/xgb_model.joblib
+.ipynb_checkpoints/
+.venv/
+*.egg-info/

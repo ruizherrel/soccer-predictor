@@ -1,0 +1,11 @@
+pandas~=2.2
+numpy>=2.0,<3.0
+scipy~=1.14
+statsmodels>=0.14.2
+scikit-learn~=1.5
+joblib~=1.4
+pyarrow~=17.0
+requests~=2.32
+plotly~=5.24
+streamlit
+xgboost>=3.4
