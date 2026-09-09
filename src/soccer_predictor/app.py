@@ -34,6 +34,11 @@ def _load_model(league: str):
     return xgb_model.load_model(league)
 
 
+@st.cache_data(ttl=6 * 3600)
+def _load_upcoming_fixtures(league: str):
+    return ingest.fetch_upcoming_fixtures(league)
+
+
 league = st.selectbox(
     "Liga",
     options=list(config.LEAGUES),
@@ -63,6 +68,23 @@ if not config.model_path(league).exists():
         "`python scripts/train.py` desde la carpeta del proyecto."
     )
     st.stop()
+
+with st.spinner("Buscando si hay un partido real programado..."):
+    upcoming_fixtures = _load_upcoming_fixtures(league)
+    fixture_date = (
+        ingest.find_upcoming_fixture(upcoming_fixtures, home_team, away_team)
+        if not upcoming_fixtures.empty
+        else None
+    )
+
+if fixture_date is not None:
+    st.success(f"📅 Partido real programado para el {fixture_date.strftime('%d/%m/%Y')}.")
+else:
+    st.caption(
+        "No encontramos un partido programado próximamente entre estos dos equipos según nuestros "
+        "datos — esta es una predicción hipotética con la forma y el rating más recientes disponibles, "
+        "no necesariamente su próximo partido real."
+    )
 
 if st.button("Predecir", type="primary"):
     with st.spinner("Calculando ratings y probabilidades..."):

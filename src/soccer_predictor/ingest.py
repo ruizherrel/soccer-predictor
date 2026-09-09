@@ -166,7 +166,19 @@ def _raw_cache_path(season: str, league: str) -> Path:
 # NOT include the post-season "liguilla" knockout (round numbering stops at
 # the end of the regular phase), which this project accepts as a known gap.
 THESPORTSDB_API_KEY = "123"
-THESPORTSDB_LEAGUE_IDS = {"MEX": "4350"}
+# Verified directly against the API (search_all_leagues.php / all_leagues.php
+# / searchteams.php) rather than guessed — TheSportsDB's naming/ID scheme
+# isn't predictable from the league code.
+THESPORTSDB_LEAGUE_IDS = {
+    "E0": "4328",
+    "SP1": "4335",
+    "D1": "4331",
+    "I1": "4332",
+    "F1": "4334",
+    "N1": "4337",
+    "P1": "4344",
+    "MEX": "4350",
+}
 THESPORTSDB_ROUND_URL = (
     "https://www.thesportsdb.com/api/v1/json/{key}/eventsround.php?id={league_id}&r={round_num}&s={season}"
 )
@@ -233,6 +245,93 @@ def fetch_raw_mexico_season(season: str) -> pd.DataFrame:
     )
     df["season"] = df["date"].map(_mx_pseudo_season)
     return df.sort_values("date").reset_index(drop=True)
+
+
+def _current_thesportsdb_season(today: pd.Timestamp | None = None) -> str:
+    today = today or pd.Timestamp.now()
+    return f"{today.year}-{today.year + 1}" if today.month >= 8 else f"{today.year - 1}-{today.year}"
+
+
+def _names_roughly_match(name_a: str, name_b: str) -> bool:
+    """True only when one (accent-stripped, lowercased) name is a
+    substring of the other. Deliberately conservative: no token splitting
+    or fuzzy distance, since e.g. "Real Madrid" and "Real Sociedad" share a
+    token but are obviously different clubs — a false "next fixture" match
+    is worse than missing a real one, which just falls back to the
+    hypothetical-matchup framing the app already uses."""
+    import unicodedata
+
+    def norm(s: str) -> str:
+        s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode()
+        return s.lower().strip()
+
+    a, b = norm(name_a), norm(name_b)
+    return a == b or a in b or b in a
+
+
+def fetch_upcoming_fixtures(league: str, rounds_ahead: int = 2) -> pd.DataFrame:
+    """Real scheduled upcoming fixtures for `league` via TheSportsDB
+    (eventsnextleague.php, the obvious endpoint, is capped at 1 result on
+    the free tier; eventsround.php isn't, same as the Mexico backfill).
+    Scans forward from round 1 for the first round with an unplayed
+    fixture, then also collects `rounds_ahead - 1` further rounds.
+
+    Mexico's team names are normalized the same way as the historical data
+    (same source), so they match exactly. Every other league's names are
+    TheSportsDB's own and don't always match football-data.co.uk's
+    abbreviated style (e.g. "Athletic Bilbao" vs "Ath Bilbao") — match
+    against them with _names_roughly_match, not equality.
+    """
+    league_id = THESPORTSDB_LEAGUE_IDS.get(league)
+    if league_id is None:
+        return pd.DataFrame(columns=["date", "home_team", "away_team"])
+
+    season = config.MEXICO_SEASONS[-1] if league == "MEX" else _current_thesportsdb_season()
+    normalize = _normalize_mexico_team if league == "MEX" else (lambda n: n)
+
+    current_round = None
+    rows = []
+    for round_num in range(1, THESPORTSDB_MAX_ROUNDS + 1):
+        events = _thesportsdb_round(league_id, season, round_num)
+        if not events:
+            break
+
+        unplayed = [e for e in events if e.get("intHomeScore") is None]
+        if unplayed and current_round is None:
+            current_round = round_num
+        if current_round is not None:
+            rows.extend(unplayed)
+            if round_num >= current_round + rounds_ahead - 1:
+                break
+        time.sleep(1.5)
+
+    if not rows:
+        return pd.DataFrame(columns=["date", "home_team", "away_team"])
+
+    df = pd.DataFrame(
+        {
+            "date": pd.to_datetime([e["dateEvent"] for e in rows]),
+            "home_team": [normalize(e["strHomeTeam"]) for e in rows],
+            "away_team": [normalize(e["strAwayTeam"]) for e in rows],
+        }
+    )
+    return df.sort_values("date").reset_index(drop=True)
+
+
+def find_upcoming_fixture(fixtures: pd.DataFrame, home_team: str, away_team: str) -> pd.Timestamp | None:
+    """Date of the next real fixture between these two teams (in either
+    order), or None if not found in `fixtures` (either genuinely not
+    scheduled soon, or a naming mismatch — see _names_roughly_match)."""
+    for _, row in fixtures.iterrows():
+        teams_match = _names_roughly_match(row["home_team"], home_team) and _names_roughly_match(
+            row["away_team"], away_team
+        )
+        teams_match_swapped = _names_roughly_match(row["home_team"], away_team) and _names_roughly_match(
+            row["away_team"], home_team
+        )
+        if teams_match or teams_match_swapped:
+            return row["date"]
+    return None
 
 
 def refresh(league: str) -> pd.DataFrame:
