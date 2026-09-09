@@ -87,7 +87,7 @@ if st.button("Predecir", type="primary"):
         )
     )
     fig_bar.update_layout(yaxis_tickformat=".0%", showlegend=False, height=350)
-    st.plotly_chart(fig_bar, use_container_width=True)
+    st.plotly_chart(fig_bar, width="stretch")
 
     st.subheader("Marcador más probable (modelo Poisson)")
     max_goals = 5
@@ -107,7 +107,7 @@ if st.button("Predecir", type="primary"):
         yaxis_title=f"Goles {home_team}",
         height=450,
     )
-    st.plotly_chart(fig_heat, use_container_width=True)
+    st.plotly_chart(fig_heat, width="stretch")
 
     top_idx = np.unravel_index(np.argmax(grid), grid.shape)
     st.caption(f"Marcador más probable: {home_team} {top_idx[0]} - {top_idx[1]} {away_team}")
