@@ -73,7 +73,12 @@ league = st.selectbox(
 
 notice = config.LEAGUES[league].get("notice")
 if notice:
-    st.warning(notice)
+    # A collapsed expander instead of a permanently-open warning box: on
+    # mobile, the full-height box was pushing the team dropdowns down far
+    # enough that the on-screen keyboard (opened by the dropdown's
+    # search-to-filter field) covered most of the option list.
+    with st.expander("⚠️ Limitaciones de esta competencia"):
+        st.write(notice)
 
 matches = _load_matches(league)
 teams = sorted(set(matches["home_team"]) | set(matches["away_team"]))
