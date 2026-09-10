@@ -29,6 +29,8 @@ App de Streamlit que predice resultados 1X2 (local/empate/visitante) de fútbol 
 
 **Alias de equipo encontrados y corregidos** (mismo patrón que México: TheSportsDB nombra al mismo club distinto entre temporadas): Champions League ("Atletico Madrid"/"Atlético Madrid", "Paris SG"/"Paris Saint-Germain") y MLS ("New York City"/"New York City FC", "Seattle Sounders"/"Seattle Sounders FC") — ver `UCL_TEAM_NAME_MAP` y `MLS_TEAM_NAME_MAP` en `ingest.py`. Si un futuro refresh muestra más equipos de los reales, revisar si hay un alias nuevo sin mapear antes de confiar en los ratings.
 
+**Rating cruzado liga doméstica → Champions League**: un equipo debutante o que regresa a Champions League (ej. Roma tras 7 años fuera) ya no arranca con el rating genérico de "equipo nuevo" — se siembra con su Elo/Pi doméstico más reciente, vía `dataset.UCL_DOMESTIC_TEAM_MAP` (~30 equipos de las 5 ligas europeas que cubrimos: Inglaterra, España, Alemania, Italia, Francia). Equipos de ligas que no cubrimos (Noruega, Turquía, Kazajistán, etc.) siguen sin este respaldo — es una limitación conocida, no un bug. `EloRatingSystem`/`PiRatingSystem` ahora aceptan un `seed_ratings` opcional por equipo (vacío por defecto, sin efecto en ninguna otra liga).
+
 **Pendiente de Holanda/Portugal**: football-data.co.uk tiene el certificado SSL roto desde que se armó este proyecto (verificado independientemente con curl/WebFetch/requests). En cuanto se recupere:
 ```
 python scripts/refresh_data.py --league N1
