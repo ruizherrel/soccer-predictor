@@ -25,8 +25,16 @@ LEAGUES = {
     "D1": {"name": "Bundesliga (Alemania)", "source": "football-data"},
     "I1": {"name": "Serie A (Italia)", "source": "football-data"},
     "F1": {"name": "Ligue 1 (Francia)", "source": "football-data"},
-    "N1": {"name": "Eredivisie (Holanda)", "source": "football-data"},
-    "P1": {"name": "Primeira Liga (Portugal)", "source": "football-data"},
+    "N1": {
+        "name": "Eredivisie (Holanda)",
+        "source": "thesportsdb",
+        "seasons": ["2022-2023", "2023-2024", "2024-2025", "2025-2026", "2026-2027"],
+    },
+    "P1": {
+        "name": "Primeira Liga (Portugal)",
+        "source": "thesportsdb",
+        "seasons": ["2022-2023", "2023-2024", "2024-2025", "2025-2026", "2026-2027"],
+    },
     "MEX": {
         "name": "Liga MX (México)",
         "source": "thesportsdb",
@@ -51,6 +59,20 @@ LEAGUES = {
             "con solo 8 partidos por equipo y un grupo de clubes que cambia "
             "cada temporada por clasificación, los ratings son más ruidosos "
             "que en una liga doméstica."
+        ),
+    },
+    "UECL": {
+        "name": "UEFA Conference League",
+        "source": "thesportsdb",
+        # Same Swiss-model reform as Champions League, started 2024-25, but
+        # only 6 league-phase matchdays here (confirmed live: round 7
+        # returns empty), not 8.
+        "seasons": ["2024-2025", "2025-2026", "2026-2027"],
+        "notice": (
+            "Solo cubre la fase de liga (jornadas 1-6), no la eliminatoria "
+            "posterior. Igual que en Champions League, el grupo de clubes "
+            "cambia cada temporada por clasificación, así que los ratings "
+            "son más ruidosos que en una liga doméstica."
         ),
     },
 }

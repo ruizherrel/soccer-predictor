@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 import sys
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 _ROOT = Path(__file__).resolve().parents[2]
 for _p in (_ROOT, _ROOT / "src"):
@@ -103,7 +104,11 @@ with st.spinner("Buscando si hay un partido real programado..."):
     )
 
 if fixture_date is not None:
-    st.success(f"📅 Partido real programado para el {fixture_date.strftime('%d/%m/%Y')}.")
+    mexico_time = fixture_date.tz_convert(ZoneInfo("America/Mexico_City"))
+    st.success(
+        f"📅 Partido real programado para el {mexico_time.strftime('%d/%m/%Y')} a las "
+        f"{mexico_time.strftime('%H:%M')} (hora del centro de México)."
+    )
 else:
     st.caption(
         "No encontramos un partido programado próximamente entre estos dos equipos según nuestros "

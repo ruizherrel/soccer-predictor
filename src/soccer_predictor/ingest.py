@@ -104,6 +104,73 @@ def _normalize_mls_team(name: str) -> str:
     return MLS_TEAM_NAME_MAP.get(name, name)
 
 
+# Same issue again, this time Eredivisie dropping (mostly) or adding club
+# prefixes/suffixes across seasons. Canonicalized to whichever variant the
+# most recent (2026-2027) season actually uses, checked per pair rather
+# than assumed -- note Sparta went the opposite direction from the rest
+# (gained "Rotterdam" instead of losing a prefix).
+N1_TEAM_NAME_MAP: dict[str, str] = {
+    "SC Cambuur": "Cambuur",
+    "FC Groningen": "Groningen",
+    "FC Twente": "Twente",
+    "FC Utrecht": "Utrecht",
+    "SC Heerenveen": "Heerenveen",
+    "SC Heracles Almelo": "Heracles Almelo",
+    "SC Telstar": "Telstar",
+    "Sparta": "Sparta Rotterdam",
+}
+
+
+def _normalize_n1_team(name: str) -> str:
+    return N1_TEAM_NAME_MAP.get(name, name)
+
+
+# Primeira Liga, same issue. "Estoril-Praia"/"Estoril Praia" (hyphen vs
+# space) is a good example of why this needs checking per pair rather than
+# trusting the automated near-duplicate search alone: neither is a
+# substring of the other (the hyphen breaks it), so it wasn't even
+# flagged as a candidate -- found by reading the actual full team list.
+P1_TEAM_NAME_MAP: dict[str, str] = {
+    "AVS Futebol SAD": "AVS",
+    "CD Nacional de Madeira": "Nacional de Madeira",
+    "FC Porto": "Porto",
+    "Guimaraes": "Vitória de Guimarães",
+    "Maritimo": "Marítimo",
+    "Estoril-Praia": "Estoril Praia",
+}
+
+
+def _normalize_p1_team(name: str) -> str:
+    return P1_TEAM_NAME_MAP.get(name, name)
+
+
+# Conference League draws from ~180 distinct clubs across just 3 seasons
+# (an even wider qualifying pyramid than Champions League), which makes an
+# exhaustive manual review of every possible pair impractical the way it
+# was for the smaller domestic leagues -- these five were found by
+# combining the automated near-duplicate search with a manual read of the
+# full team list, not an exhaustive pairwise check. "Jagiellonia
+# Bialystok"/"Jagiellonia Białystok" is a good example of why the search
+# alone isn't enough: Polish "ł" has no NFKD decomposition to a plain "l"
+# the way accented Latin letters do, so accent-stripping just drops it
+# entirely ("Białystok" -> "Biaystok"), which doesn't match "Bialystok" as
+# a substring either. "TNS"/"The New Saints" is a plain abbreviation, not
+# a spelling variant, so no substring relationship exists at all. If a
+# rating for an unfamiliar club here looks obviously wrong, check for a
+# further unmapped alias before trusting it.
+UECL_TEAM_NAME_MAP: dict[str, str] = {
+    "FC Astana": "Astana",
+    "Jagiellonia Bialystok": "Jagiellonia Białystok",
+    "Istanbul Basaksehir": "İstanbul Başakşehir",
+    "Shamrock": "Shamrock Rovers",
+    "TNS": "The New Saints",
+}
+
+
+def _normalize_uecl_team(name: str) -> str:
+    return UECL_TEAM_NAME_MAP.get(name, name)
+
+
 _RAW_COLUMNS = {
     "Date": "date",
     "HomeTeam": "home_team",
@@ -213,6 +280,7 @@ THESPORTSDB_LEAGUE_IDS = {
     "MEX": "4350",
     "MLS": "4346",
     "UCL": "4480",
+    "UECL": "5071",
 }
 THESPORTSDB_ROUND_URL = (
     "https://www.thesportsdb.com/api/v1/json/{key}/eventsround.php?id={league_id}&r={round_num}&s={season}"
@@ -261,6 +329,12 @@ def _thesportsdb_normalize(league: str, name: str) -> str:
         return _normalize_ucl_team(name)
     if league == "MLS":
         return _normalize_mls_team(name)
+    if league == "N1":
+        return _normalize_n1_team(name)
+    if league == "P1":
+        return _normalize_p1_team(name)
+    if league == "UECL":
+        return _normalize_uecl_team(name)
     return name
 
 
@@ -364,9 +438,15 @@ def fetch_upcoming_fixtures(league: str, rounds_ahead: int = 2) -> pd.DataFrame:
     if not rows:
         return pd.DataFrame(columns=["date", "home_team", "away_team"])
 
+    # strTimestamp (dateEvent + strTime combined) is UTC — confirmed live
+    # against strTimeLocal for a Spain fixture (19:00 vs 21:00 CEST, a
+    # UTC+2 gap). Falls back to date-only (midnight) for the rare event
+    # missing it rather than dropping the row.
     df = pd.DataFrame(
         {
-            "date": pd.to_datetime([e["dateEvent"] for e in rows]),
+            "date": pd.to_datetime(
+                [e.get("strTimestamp") or e["dateEvent"] for e in rows], utc=True
+            ),
             "home_team": [_thesportsdb_normalize(league, e["strHomeTeam"]) for e in rows],
             "away_team": [_thesportsdb_normalize(league, e["strAwayTeam"]) for e in rows],
         }
@@ -375,8 +455,8 @@ def fetch_upcoming_fixtures(league: str, rounds_ahead: int = 2) -> pd.DataFrame:
 
 
 def find_upcoming_fixture(fixtures: pd.DataFrame, home_team: str, away_team: str) -> pd.Timestamp | None:
-    """Date of the next real fixture between these two teams (in either
-    order), or None if not found in `fixtures` (either genuinely not
+    """UTC date+time of the next real fixture between these two teams (in
+    either order), or None if not found in `fixtures` (either genuinely not
     scheduled soon, or a naming mismatch — see _names_roughly_match)."""
     for _, row in fixtures.iterrows():
         teams_match = _names_roughly_match(row["home_team"], home_team) and _names_roughly_match(

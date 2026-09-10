@@ -70,24 +70,54 @@ UCL_DOMESTIC_TEAM_MAP: dict[str, tuple[str, str]] = {
     "Paris Saint-Germain": ("F1", "Paris SG"),
 }
 
+# Same idea for the Conference League, cross-referenced against all 7
+# domestic leagues this project now covers (including Netherlands/Portugal,
+# added in the same session). Found the same way: automated near-duplicate
+# search over each domestic team list as a candidate generator, manually
+# verified -- which excluded two more false positives from the same
+# "Inter" ambiguity as Champions League's ("Inter Club d'Escaldes" and
+# "Inter Turku" both substring-matching Serie A's "Inter", i.e. Inter
+# Milan; neither actually plays in Serie A).
+UECL_DOMESTIC_TEAM_MAP: dict[str, tuple[str, str]] = {
+    "Chelsea": ("E0", "Chelsea"),
+    "Crystal Palace": ("E0", "Crystal Palace"),
+    "Rayo Vallecano": ("SP1", "Vallecano"),
+    "Real Betis": ("SP1", "Betis"),
+    "FC Heidenheim": ("D1", "Heidenheim"),
+    "Mainz": ("D1", "Mainz"),
+    "Fiorentina": ("I1", "Fiorentina"),
+    "Strasbourg": ("F1", "Strasbourg"),
+    "AZ Alkmaar": ("N1", "AZ Alkmaar"),
+    "Ajax": ("N1", "Ajax"),
+    "Twente": ("N1", "Twente"),
+    "Braga": ("P1", "Braga"),
+    "Guimaraes": ("P1", "Vitória de Guimarães"),
+}
+
+CROSS_LEAGUE_TEAM_MAPS: dict[str, dict[str, tuple[str, str]]] = {
+    "UCL": UCL_DOMESTIC_TEAM_MAP,
+    "UECL": UECL_DOMESTIC_TEAM_MAP,
+}
+
 
 def _cross_league_seed_ratings(league: str) -> tuple[dict[str, float], dict[str, tuple[float, float]]]:
     """For a competition mixing teams from leagues we already cover (right
-    now: just Champions League), returns each team's latest domestic Elo/Pi
-    rating to use as its starting rating in this competition instead of the
-    generic newly-promoted default -- a debutant or long-absent big club
-    (e.g. Roma returning to the Champions League after 7 years) is nothing
-    like an actual newly-promoted team, and treating it that way wastes
-    real signal we already have. Only covers teams from the domestic
-    leagues this project has data for; every other team keeps the
-    unchanged default seeding."""
+    now: Champions League and Conference League), returns each team's
+    latest domestic Elo/Pi rating to use as its starting rating in this
+    competition instead of the generic newly-promoted default -- a
+    debutant or long-absent big club (e.g. Roma returning to the Champions
+    League after 7 years) is nothing like an actual newly-promoted team,
+    and treating it that way wastes real signal we already have. Only
+    covers teams from the domestic leagues this project has data for;
+    every other team keeps the unchanged default seeding."""
     from . import ingest
 
-    if league != "UCL":
+    team_map = CROSS_LEAGUE_TEAM_MAPS.get(league)
+    if not team_map:
         return {}, {}
 
     by_domestic_league: dict[str, list[tuple[str, str]]] = {}
-    for comp_name, (domestic_league, domestic_name) in UCL_DOMESTIC_TEAM_MAP.items():
+    for comp_name, (domestic_league, domestic_name) in team_map.items():
         by_domestic_league.setdefault(domestic_league, []).append((comp_name, domestic_name))
 
     elo_seeds: dict[str, float] = {}
