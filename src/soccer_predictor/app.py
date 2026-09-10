@@ -19,6 +19,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+import streamlit.components.v1 as components
 
 import config
 from soccer_predictor import dataset, ingest, xgb_model
@@ -38,6 +39,38 @@ st.markdown(
     </style>
     """,
     unsafe_allow_html=True,
+)
+
+# Auto-select the current value's text when a dropdown search box gets
+# focus, so typing immediately replaces it instead of requiring the user
+# to clear it by hand first — most noticeable on mobile, where retyping
+# over an existing team name is fiddly. Unofficial: Streamlit strips
+# <script> tags from st.markdown, so this goes through components.v1.html
+# instead, reaching into the parent page from its iframe (works because
+# that iframe isn't sandboxed against it) — a document-level "focusin"
+# listener survives Streamlit's re-renders where a per-widget listener
+# wouldn't. If a future Streamlit/BaseWeb version changes this markup or
+# tightens the iframe sandboxing, this silently just stops doing anything
+# rather than breaking the app.
+components.html(
+    """
+    <script>
+    (function () {
+        try {
+            var doc = window.parent.document;
+            if (doc.__teamSelectAllBound) return;
+            doc.__teamSelectAllBound = true;
+            doc.addEventListener("focusin", function (e) {
+                var el = e.target;
+                if (el && el.tagName === "INPUT" && el.closest('div[data-baseweb="select"]')) {
+                    setTimeout(function () { el.select(); }, 0);
+                }
+            });
+        } catch (err) {}
+    })();
+    </script>
+    """,
+    height=0,
 )
 
 
