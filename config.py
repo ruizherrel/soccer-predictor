@@ -75,6 +75,32 @@ LEAGUES = {
             "son más ruidosos que en una liga doméstica."
         ),
     },
+    "MX2": {
+        "name": "Liga de Expansión MX (México)",
+        "source": "thesportsdb",
+        "seasons": ["2022-2023", "2023-2024", "2024-2025", "2025-2026", "2026-2027"],
+    },
+    "LIB": {
+        "name": "Copa Libertadores",
+        "source": "thesportsdb",
+        # Only the group stage (rounds 1-6) is fetchable the same way as
+        # every other league here. The knockout rounds that follow use a
+        # sparse, non-sequential round numbering scheme in TheSportsDB
+        # (e.g. round 16 for the round of 16, then round 125 for the
+        # quarterfinals in the 2026 season, with no discoverable pattern
+        # connecting them and likely different per season) that doesn't
+        # fit the "scan rounds 1..N, stop at the first empty one" fetch
+        # this project uses everywhere else, so it's excluded the same way
+        # UCL/UECL's knockout rounds already are.
+        "seasons": ["2022", "2023", "2024", "2025", "2026"],
+        "notice": (
+            "Solo cubre la fase de grupos (jornadas 1-6), no la eliminatoria "
+            "posterior — la numeración de esas rondas en la fuente de datos "
+            "no sigue un patrón simple. El grupo de clubes también cambia "
+            "cada temporada por clasificación, así que los ratings son más "
+            "ruidosos que en una liga doméstica."
+        ),
+    },
 }
 
 # Season codes as used by football-data.co.uk, e.g. "2324" = 2023-24.

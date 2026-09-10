@@ -171,6 +171,45 @@ def _normalize_uecl_team(name: str) -> str:
     return UECL_TEAM_NAME_MAP.get(name, name)
 
 
+# Liga de Expansión MX, same pattern. "Leones Negros UDG"/"Leones Negros
+# UdeG" is another case the automated search misses even though both sides
+# are ASCII with no accents at all -- "udg" isn't a substring of "udeg" (or
+# vice versa), it's a capitalization/abbreviation difference, so only a
+# manual read of the full team list caught it. All four canonicalized to
+# whichever spelling the 2025A season onward actually uses.
+MX2_TEAM_NAME_MAP: dict[str, str] = {
+    "Morelia": "Atlético Morelia",
+    "Dorados": "Dorados de Sinaloa",
+    "Tepatitlán FC": "Tepatitlán",
+    "Leones Negros UDG": "Leones Negros UdeG",
+}
+
+
+def _normalize_mx2_team(name: str) -> str:
+    return MX2_TEAM_NAME_MAP.get(name, name)
+
+
+# Copa Libertadores, same pattern again -- mostly accents dropped in older
+# seasons. "Universidad Católica" (Chile) and "Universidad Católica del
+# Ecuador" looked like an obvious candidate too (both matched by the
+# automated search) but are two genuinely different clubs: verified they
+# both appear in the SAME 2026 season with entirely different opponent
+# sets, which a same-team alias could never do -- left unmapped.
+LIB_TEAM_NAME_MAP: dict[str, str] = {
+    "Bolivar": "Bolívar",
+    "Botafogo RJ": "Botafogo",
+    "Deportivo Táchira F.C.": "Deportivo Táchira",
+    "Estudiantes de la Plata": "Estudiantes de La Plata",
+    "Sao Paulo": "São Paulo",
+    "Talleres de Cordoba": "Talleres de Córdoba",
+    "Velez Sarsfield": "Vélez Sarsfield",
+}
+
+
+def _normalize_lib_team(name: str) -> str:
+    return LIB_TEAM_NAME_MAP.get(name, name)
+
+
 _RAW_COLUMNS = {
     "Date": "date",
     "HomeTeam": "home_team",
@@ -281,6 +320,8 @@ THESPORTSDB_LEAGUE_IDS = {
     "MLS": "4346",
     "UCL": "4480",
     "UECL": "5071",
+    "MX2": "4654",
+    "LIB": "4501",
 }
 THESPORTSDB_ROUND_URL = (
     "https://www.thesportsdb.com/api/v1/json/{key}/eventsround.php?id={league_id}&r={round_num}&s={season}"
@@ -335,6 +376,10 @@ def _thesportsdb_normalize(league: str, name: str) -> str:
         return _normalize_p1_team(name)
     if league == "UECL":
         return _normalize_uecl_team(name)
+    if league == "MX2":
+        return _normalize_mx2_team(name)
+    if league == "LIB":
+        return _normalize_lib_team(name)
     return name
 
 
@@ -370,10 +415,10 @@ def fetch_raw_thesportsdb_season(league: str, season: str) -> pd.DataFrame:
             "result": result,
         }
     )
-    # Only Mexico plays two short tournaments within one source "season"
-    # (Apertura Jul-Dec, Clausura Jan-Jun); everyone else's season slug
-    # already matches one real competitive block.
-    df["season"] = df["date"].map(_mx_pseudo_season) if league == "MEX" else season
+    # Only the two Mexican leagues play two short tournaments within one
+    # source "season" (Apertura Jul-Dec, Clausura Jan-Jun); everyone else's
+    # season slug already matches one real competitive block.
+    df["season"] = df["date"].map(_mx_pseudo_season) if league in ("MEX", "MX2") else season
     return df.sort_values("date").reset_index(drop=True)
 
 

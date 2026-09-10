@@ -121,6 +121,23 @@ class PoissonGoalModel:
         team_eff = self.team_effects.get(attacker, self.avg_team_effect)
         opp_eff = self.opponent_effects.get(defender, self.avg_opponent_effect)
         eta = self.intercept + self.is_home_coef * is_home + team_eff + opp_eff
+        # Sparse competitions (e.g. Copa Libertadores: 82 clubs across only
+        # 510 matches) can still produce a poorly-conditioned GLM fit even
+        # after the ridge fallback in fit() -- seen live producing an eta
+        # large enough that exp(eta) overflowed to inf, which XGBoost then
+        # refuses to train on outright (unlike NaN, which it accepts as
+        # missing). +-10 alone wasn't tight enough either: score_grid only
+        # evaluates the Poisson pmf over 0..max_goals (~5), and a lambda
+        # anywhere near e^10=~22000 makes every one of those cells
+        # underflow to exactly 0.0 in float64 (pmf(0, 22000) = e^-22000,
+        # far below the ~1e-308 float64 floor), so the grid's sum is 0 and
+        # normalizing it divides by zero -- also seen live. Clipping to
+        # +-5 keeps expected goals within [0.0067, ~148]: still wildly
+        # beyond anything a real match could justify, so no realistic eta
+        # (normally within +-3) is ever affected, but small enough that
+        # pmf(0, 148) = e^-148 stays comfortably representable instead of
+        # underflowing.
+        eta = float(np.clip(eta, -5.0, 5.0))
         return float(np.exp(eta))
 
     def _fit_rho(self, matches: pd.DataFrame, home_weights: np.ndarray) -> None:
