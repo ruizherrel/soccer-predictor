@@ -21,12 +21,99 @@ def _season_order(matches: pd.DataFrame) -> list[str]:
     return matches["season"].drop_duplicates().tolist()
 
 
-def build_ratings_features(matches: pd.DataFrame) -> tuple[pd.DataFrame, EloRatingSystem, PiRatingSystem]:
+# Champions League teams cross-referenced against the domestic leagues this
+# project covers: name -> (domestic league code, domestic team name).
+# Built from an automated near-duplicate search (reusing
+# ingest._names_roughly_match) over each league's real team list, THEN
+# manually verified and corrected -- the automated pass alone produced two
+# dangerous false positives ("Inter Milan" substring-matching Serie A's
+# "Milan", which is actually AC Milan, a different club; "Inter Club
+# d'Escaldes", a small Andorran side, matching "Inter" the same way), and
+# missed real pairs entirely because neither name is a substring of the
+# other (e.g. "Atlético Madrid" vs "Ath Madrid", "Paris Saint-Germain" vs
+# "Paris SG"). Every entry below was checked against that league's actual
+# team list, not assumed. Extend this if a new mapping is needed; leagues
+# we don't cover (Portugal, Turkey, smaller UEFA associations, etc.) simply
+# aren't representable here.
+UCL_DOMESTIC_TEAM_MAP: dict[str, tuple[str, str]] = {
+    "Arsenal": ("E0", "Arsenal"),
+    "Aston Villa": ("E0", "Aston Villa"),
+    "Chelsea": ("E0", "Chelsea"),
+    "Liverpool": ("E0", "Liverpool"),
+    "Newcastle United": ("E0", "Newcastle"),
+    "Tottenham Hotspur": ("E0", "Tottenham"),
+    "Atlético Madrid": ("SP1", "Ath Madrid"),
+    "Athletic Bilbao": ("SP1", "Ath Bilbao"),
+    "Barcelona": ("SP1", "Barcelona"),
+    "Girona": ("SP1", "Girona"),
+    "Real Betis": ("SP1", "Betis"),
+    "Real Madrid": ("SP1", "Real Madrid"),
+    "Villarreal": ("SP1", "Villarreal"),
+    "Bayer Leverkusen": ("D1", "Leverkusen"),
+    "Bayern Munich": ("D1", "Bayern Munich"),
+    "Borussia Dortmund": ("D1", "Dortmund"),
+    "Eintracht Frankfurt": ("D1", "Ein Frankfurt"),
+    "RB Leipzig": ("D1", "RB Leipzig"),
+    "Stuttgart": ("D1", "Stuttgart"),
+    "AC Milan": ("I1", "Milan"),
+    "Atalanta": ("I1", "Atalanta"),
+    "Bologna": ("I1", "Bologna"),
+    "Inter Milan": ("I1", "Inter"),
+    "Juventus": ("I1", "Juventus"),
+    "Napoli": ("I1", "Napoli"),
+    "Roma": ("I1", "Roma"),
+    "Brest": ("F1", "Brest"),
+    "Lille": ("F1", "Lille"),
+    "Lyon": ("F1", "Lyon"),
+    "Marseille": ("F1", "Marseille"),
+    "Monaco": ("F1", "Monaco"),
+    "Paris Saint-Germain": ("F1", "Paris SG"),
+}
+
+
+def _cross_league_seed_ratings(league: str) -> tuple[dict[str, float], dict[str, tuple[float, float]]]:
+    """For a competition mixing teams from leagues we already cover (right
+    now: just Champions League), returns each team's latest domestic Elo/Pi
+    rating to use as its starting rating in this competition instead of the
+    generic newly-promoted default -- a debutant or long-absent big club
+    (e.g. Roma returning to the Champions League after 7 years) is nothing
+    like an actual newly-promoted team, and treating it that way wastes
+    real signal we already have. Only covers teams from the domestic
+    leagues this project has data for; every other team keeps the
+    unchanged default seeding."""
+    from . import ingest
+
+    if league != "UCL":
+        return {}, {}
+
+    by_domestic_league: dict[str, list[tuple[str, str]]] = {}
+    for comp_name, (domestic_league, domestic_name) in UCL_DOMESTIC_TEAM_MAP.items():
+        by_domestic_league.setdefault(domestic_league, []).append((comp_name, domestic_name))
+
+    elo_seeds: dict[str, float] = {}
+    pi_seeds: dict[str, tuple[float, float]] = {}
+    for domestic_league, pairs in by_domestic_league.items():
+        domestic_matches = ingest.load_matches(domestic_league)
+        _ratings, elo, pi = build_ratings_features(domestic_matches)
+        for comp_name, domestic_name in pairs:
+            if domestic_name in elo.ratings:
+                elo_seeds[comp_name] = elo.ratings[domestic_name]
+            if domestic_name in pi.ratings:
+                pi_seeds[comp_name] = pi.ratings[domestic_name]
+    return elo_seeds, pi_seeds
+
+
+def build_ratings_features(
+    matches: pd.DataFrame, league: str | None = None
+) -> tuple[pd.DataFrame, EloRatingSystem, PiRatingSystem]:
     """One row per match with pre-match Elo and Pi rating snapshots, plus the
     fully-updated rating systems (state after every match has been applied)
-    for use in live/current-day predictions."""
-    elo = EloRatingSystem()
-    pi = PiRatingSystem()
+    for use in live/current-day predictions. `league` enables cross-league
+    seeding (see _cross_league_seed_ratings) for competitions that need it;
+    omit it (as every plain domestic league does) for unchanged behavior."""
+    elo_seeds, pi_seeds = _cross_league_seed_ratings(league) if league else ({}, {})
+    elo = EloRatingSystem(seed_ratings=elo_seeds)
+    pi = PiRatingSystem(seed_ratings=pi_seeds)
 
     current_season = None
     prev_teams: set[str] | None = None
@@ -115,12 +202,12 @@ def build_poisson_features(matches: pd.DataFrame, seasons_order: list[str]) -> p
     return pd.concat(frames, ignore_index=True)
 
 
-def build_features(matches: pd.DataFrame) -> pd.DataFrame:
+def build_features(matches: pd.DataFrame, league: str | None = None) -> pd.DataFrame:
     matches = matches.sort_values("date").reset_index(drop=True)
     seasons_order = _season_order(matches)
     season_index = {s: i for i, s in enumerate(seasons_order)}
 
-    ratings, _elo, _pi = build_ratings_features(matches)
+    ratings, _elo, _pi = build_ratings_features(matches, league)
     poisson_feats = build_poisson_features(matches, seasons_order)
     form = attach_form_features(matches)
 
@@ -158,7 +245,7 @@ def build_and_save_features(league: str) -> pd.DataFrame:
     from . import ingest
 
     matches = ingest.load_matches(league)
-    features = build_features(matches)
+    features = build_features(matches, league)
     features.to_parquet(config.features_path(league), index=False)
     return features
 
@@ -171,14 +258,14 @@ def load_features(league: str) -> pd.DataFrame:
 
 
 def build_live_features(
-    matches: pd.DataFrame, home_team: str, away_team: str
+    matches: pd.DataFrame, home_team: str, away_team: str, league: str | None = None
 ) -> tuple[pd.DataFrame, PoissonGoalModel]:
     """Single-row feature table for a hypothetical fixture "as of today",
     for interactive predictions (the Streamlit app). Also returns the fitted
     Poisson model so the caller can render a scoreline probability grid."""
     matches = matches.sort_values("date").reset_index(drop=True)
 
-    _ratings_df, elo, pi = build_ratings_features(matches)
+    _ratings_df, elo, pi = build_ratings_features(matches, league)
     elo_home, elo_away = elo.snapshot(home_team, away_team)
     pi_home, pi_away = pi.snapshot(home_team, away_team)
 

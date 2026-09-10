@@ -99,7 +99,7 @@ else:
 
 if st.button("Predecir", type="primary"):
     with st.spinner("Calculando ratings y probabilidades..."):
-        live_row, poisson_model = dataset.build_live_features(matches, home_team, away_team)
+        live_row, poisson_model = dataset.build_live_features(matches, home_team, away_team, league)
         model, feature_columns = _load_model(league)
         probs = xgb_model.predict_proba(model, live_row, feature_columns)[0]  # (away, draw, home)
         p_away, p_draw, p_home = probs

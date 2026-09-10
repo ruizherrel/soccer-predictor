@@ -19,17 +19,23 @@ class PiRatingSystem:
         beta: float = config.PI_BETA,
         promoted_initial: float = config.PI_PROMOTED_INITIAL,
         season_regression: float = config.PI_SEASON_REGRESSION,
+        seed_ratings: dict[str, tuple[float, float]] | None = None,
     ) -> None:
         self.lam = lam
         self.alpha = alpha
         self.beta = beta
         self.promoted_initial = promoted_initial
         self.season_regression = season_regression
+        # Per-team override for a first-ever rating, e.g. a Champions League
+        # debutant seeded from its domestic-league Pi rating instead of the
+        # generic default — see dataset.py's cross-league seeding. Empty by
+        # default, so every other league behaves exactly as before.
+        self.seed_ratings = seed_ratings or {}
         # team -> (home_rating, away_rating)
         self.ratings: dict[str, tuple[float, float]] = {}
 
     def rating(self, team: str) -> tuple[float, float]:
-        return self.ratings.get(team, (0.0, 0.0))
+        return self.ratings.get(team, self.seed_ratings.get(team, (0.0, 0.0)))
 
     def predict_goal_diff(self, home: str, away: str) -> float:
         home_r, _ = self.rating(home)
@@ -63,7 +69,7 @@ class PiRatingSystem:
     def ensure_seeded(self, team: str) -> None:
         """Seed a team that has never been rated, e.g. a newly promoted club."""
         if team not in self.ratings:
-            self.ratings[team] = (self.promoted_initial, self.promoted_initial)
+            self.ratings[team] = self.seed_ratings.get(team, (self.promoted_initial, self.promoted_initial))
 
     def new_season_regression(self) -> None:
         """Pull ratings partway back toward 0 (league average) between seasons."""

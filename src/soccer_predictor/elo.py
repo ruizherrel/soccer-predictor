@@ -18,16 +18,22 @@ class EloRatingSystem:
         initial: float = config.ELO_INITIAL,
         promoted_initial: float = config.ELO_PROMOTED_INITIAL,
         season_regression: float = config.ELO_SEASON_REGRESSION,
+        seed_ratings: dict[str, float] | None = None,
     ) -> None:
         self.k = k
         self.home_adv = home_adv
         self.initial = initial
         self.promoted_initial = promoted_initial
         self.season_regression = season_regression
+        # Per-team override for a first-ever rating, e.g. a Champions League
+        # debutant seeded from its domestic-league Elo instead of the
+        # generic default — see dataset.py's cross-league seeding. Empty by
+        # default, so every other league behaves exactly as before.
+        self.seed_ratings = seed_ratings or {}
         self.ratings: dict[str, float] = {}
 
     def rating(self, team: str) -> float:
-        return self.ratings.get(team, self.initial)
+        return self.ratings.get(team, self.seed_ratings.get(team, self.initial))
 
     def expected_home(self, home: str, away: str) -> float:
         r_h, r_a = self.rating(home), self.rating(away)
@@ -60,7 +66,7 @@ class EloRatingSystem:
     def ensure_seeded(self, team: str) -> None:
         """Seed a team that has never been rated, e.g. a newly promoted club."""
         if team not in self.ratings:
-            self.ratings[team] = self.promoted_initial
+            self.ratings[team] = self.seed_ratings.get(team, self.promoted_initial)
 
     def new_season_regression(self) -> None:
         """Pull every team's rating partway back to the mean between seasons,
