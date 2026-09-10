@@ -25,6 +25,20 @@ from soccer_predictor import dataset, ingest, xgb_model
 st.set_page_config(page_title="Predictor de fútbol", page_icon="⚽")
 st.title("⚽ Predictor de partidos")
 
+# Bigger text for the team/league dropdowns (both the closed selectbox and
+# its open option list) — data-baseweb is a stable attribute of the
+# underlying widget library, unlikely to shift across Streamlit versions
+# the way generated class names do.
+st.markdown(
+    """
+    <style>
+    div[data-baseweb="select"] * { font-size: 1.15rem !important; }
+    ul[role="listbox"] li { font-size: 1.15rem !important; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 
 @st.cache_data(ttl=3600)
 def _load_matches(league: str):
