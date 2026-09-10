@@ -140,9 +140,15 @@ def build_ratings_features(
     fully-updated rating systems (state after every match has been applied)
     for use in live/current-day predictions. `league` enables cross-league
     seeding (see _cross_league_seed_ratings) for competitions that need it;
-    omit it (as every plain domestic league does) for unchanged behavior."""
+    omit it (as every plain domestic league does) for unchanged behavior.
+    Also resolves per-league Elo overrides (e.g. MLB's much lower K and
+    home-field advantage) from config.LEAGUES, falling back to the global
+    config.ELO_K/ELO_HOME_ADV for every league that doesn't set its own."""
     elo_seeds, pi_seeds = _cross_league_seed_ratings(league) if league else ({}, {})
-    elo = EloRatingSystem(seed_ratings=elo_seeds)
+    league_cfg = config.LEAGUES.get(league, {}) if league else {}
+    elo_k = league_cfg.get("elo_k", config.ELO_K)
+    elo_home_adv = league_cfg.get("elo_home_adv", config.ELO_HOME_ADV)
+    elo = EloRatingSystem(k=elo_k, home_adv=elo_home_adv, seed_ratings=elo_seeds)
     pi = PiRatingSystem(seed_ratings=pi_seeds)
 
     current_season = None
@@ -190,14 +196,23 @@ def build_ratings_features(
     return pd.DataFrame(rows), elo, pi
 
 
-def build_poisson_features(matches: pd.DataFrame, seasons_order: list[str]) -> pd.DataFrame:
+def build_poisson_features(
+    matches: pd.DataFrame, seasons_order: list[str], league: str | None = None
+) -> pd.DataFrame:
     """One row per match with season-boundary Poisson expected-goals features.
 
     The Poisson model is refit once per season using only prior seasons'
     matches (never mid-season), then used to score every fixture in that
     season. The very first season has no prior data, so its rows get NaN
     (XGBoost handles missing values natively).
+
+    `league` resolves a per-league use_dixon_coles override (MLB disables
+    it -- the correction targets a soccer-specific low-score bias with no
+    equivalent in baseball); every league without an override keeps using
+    Dixon-Coles as before.
     """
+    league_cfg = config.LEAGUES.get(league, {}) if league else {}
+    use_dixon_coles = league_cfg.get("use_dixon_coles", True)
     frames = []
     for i, season in enumerate(seasons_order):
         season_matches = matches[matches["season"] == season]
@@ -211,7 +226,9 @@ def build_poisson_features(matches: pd.DataFrame, seasons_order: list[str]) -> p
             continue
 
         train_matches = matches[matches["season"].isin(seasons_order[:i])]
-        model = PoissonGoalModel().fit(train_matches, as_of_date=season_matches["date"].min())
+        model = PoissonGoalModel(use_dixon_coles=use_dixon_coles).fit(
+            train_matches, as_of_date=season_matches["date"].min()
+        )
 
         lam, mu = model.predict_lambdas_bulk(season_matches["home_team"], season_matches["away_team"])
         p_home, p_draw, p_away = [], [], []
@@ -238,7 +255,7 @@ def build_features(matches: pd.DataFrame, league: str | None = None) -> pd.DataF
     season_index = {s: i for i, s in enumerate(seasons_order)}
 
     ratings, _elo, _pi = build_ratings_features(matches, league)
-    poisson_feats = build_poisson_features(matches, seasons_order)
+    poisson_feats = build_poisson_features(matches, seasons_order, league)
     form = attach_form_features(matches)
 
     out = matches.merge(ratings, on=["date", "home_team", "away_team"], how="left")
@@ -302,7 +319,11 @@ def build_live_features(
     home_form = current_form(matches, home_team)
     away_form = current_form(matches, away_team)
 
-    poisson_model = PoissonGoalModel().fit(matches, as_of_date=matches["date"].max())
+    league_cfg = config.LEAGUES.get(league, {}) if league else {}
+    use_dixon_coles = league_cfg.get("use_dixon_coles", True)
+    poisson_model = PoissonGoalModel(use_dixon_coles=use_dixon_coles).fit(
+        matches, as_of_date=matches["date"].max()
+    )
     lam, mu = poisson_model.predict_lambdas(home_team, away_team)
 
     row = {

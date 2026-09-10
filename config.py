@@ -20,33 +20,38 @@ for _dir in (DATA_RAW, DATA_PROCESSED, MODELS_DIR):
 #   (confirmed live per league, not assumed) — the last entry is treated as
 #   the current, still-in-progress one and always re-fetched.
 LEAGUES = {
-    "E0": {"name": "Premier League (Inglaterra)", "source": "football-data"},
-    "SP1": {"name": "La Liga (España)", "source": "football-data"},
-    "D1": {"name": "Bundesliga (Alemania)", "source": "football-data"},
-    "I1": {"name": "Serie A (Italia)", "source": "football-data"},
-    "F1": {"name": "Ligue 1 (Francia)", "source": "football-data"},
+    "E0": {"name": "Premier League (Inglaterra)", "sport": "soccer", "source": "football-data"},
+    "SP1": {"name": "La Liga (España)", "sport": "soccer", "source": "football-data"},
+    "D1": {"name": "Bundesliga (Alemania)", "sport": "soccer", "source": "football-data"},
+    "I1": {"name": "Serie A (Italia)", "sport": "soccer", "source": "football-data"},
+    "F1": {"name": "Ligue 1 (Francia)", "sport": "soccer", "source": "football-data"},
     "N1": {
         "name": "Eredivisie (Holanda)",
+        "sport": "soccer",
         "source": "thesportsdb",
         "seasons": ["2022-2023", "2023-2024", "2024-2025", "2025-2026", "2026-2027"],
     },
     "P1": {
         "name": "Primeira Liga (Portugal)",
+        "sport": "soccer",
         "source": "thesportsdb",
         "seasons": ["2022-2023", "2023-2024", "2024-2025", "2025-2026", "2026-2027"],
     },
     "MEX": {
         "name": "Liga MX (México)",
+        "sport": "soccer",
         "source": "thesportsdb",
         "seasons": ["2022-2023", "2023-2024", "2024-2025", "2025-2026", "2026-2027"],
     },
     "MLS": {
         "name": "MLS (Estados Unidos)",
+        "sport": "soccer",
         "source": "thesportsdb",
         "seasons": ["2022", "2023", "2024", "2025", "2026"],
     },
     "UCL": {
         "name": "UEFA Champions League",
+        "sport": "soccer",
         "source": "thesportsdb",
         # Swiss-model league phase only (8 matchdays, single table across
         # all 36 clubs) started 2024-25; the prior 32-team group-stage
@@ -63,6 +68,7 @@ LEAGUES = {
     },
     "UECL": {
         "name": "UEFA Conference League",
+        "sport": "soccer",
         "source": "thesportsdb",
         # Same Swiss-model reform as Champions League, started 2024-25, but
         # only 6 league-phase matchdays here (confirmed live: round 7
@@ -77,11 +83,13 @@ LEAGUES = {
     },
     "MX2": {
         "name": "Liga de Expansión MX (México)",
+        "sport": "soccer",
         "source": "thesportsdb",
         "seasons": ["2022-2023", "2023-2024", "2024-2025", "2025-2026", "2026-2027"],
     },
     "LIB": {
         "name": "Copa Libertadores",
+        "sport": "soccer",
         "source": "thesportsdb",
         # Only the group stage (rounds 1-6) is fetchable the same way as
         # every other league here. The knockout rounds that follow use a
@@ -99,6 +107,33 @@ LEAGUES = {
             "no sigue un patrón simple. El grupo de clubes también cambia "
             "cada temporada por clasificación, así que los ratings son más "
             "ruidosos que en una liga doméstica."
+        ),
+    },
+    "MLB": {
+        "name": "MLB (Béisbol, Estados Unidos)",
+        "sport": "baseball",
+        "source": "thesportsdb",
+        # Bare calendar-year seasons, same format as MLS. Only 2025 onward
+        # has any data at all (2022-2024 return zero matches in every round
+        # tested) -- much shorter history than any other league here.
+        "seasons": ["2025", "2026"],
+        # FiveThirtyEight's published MLB Elo methodology: a single game is
+        # far less informative than in soccer (~162 games/season vs ~38),
+        # and home-field advantage is real but much smaller than soccer's.
+        "elo_k": 4.0,
+        "elo_home_adv": 24.0,
+        # Dixon-Coles specifically corrects the 0-0/1-0/0-1/1-1 soccer cells
+        # for a low-score bias that has no equivalent justification in
+        # baseball's scoring dynamics (no draws, different run distribution).
+        "use_dixon_coles": False,
+        "notice": (
+            "Datos incompletos: TheSportsDB (la única fuente gratuita "
+            "disponible) solo tiene historial de MLB desde 2025, y su "
+            "endpoint de partidos por jornada recorta cada semana a un "
+            "máximo de 50 partidos cuando en realidad se juegan ~90/semana "
+            "en toda la liga -- se probaron alternativas (búsqueda por "
+            "fecha) pero resultaron aún más limitadas. Los ratings y "
+            "probabilidades se calculan solo sobre esa muestra parcial."
         ),
     },
 }

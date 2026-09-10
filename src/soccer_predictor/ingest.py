@@ -322,6 +322,7 @@ THESPORTSDB_LEAGUE_IDS = {
     "UECL": "5071",
     "MX2": "4654",
     "LIB": "4501",
+    "MLB": "4424",
 }
 THESPORTSDB_ROUND_URL = (
     "https://www.thesportsdb.com/api/v1/json/{key}/eventsround.php?id={league_id}&r={round_num}&s={season}"

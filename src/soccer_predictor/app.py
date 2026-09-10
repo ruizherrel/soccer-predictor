@@ -90,9 +90,14 @@ def _load_upcoming_fixtures(league: str):
         return pd.DataFrame(columns=["date", "home_team", "away_team"])
 
 
+SPORT_OPTIONS = {"⚽ Fútbol": "soccer", "⚾ Béisbol": "baseball"}
+sport_label = st.selectbox("Deporte", options=list(SPORT_OPTIONS))
+sport = SPORT_OPTIONS[sport_label]
+
+league_options = [code for code in config.LEAGUES if config.LEAGUES[code]["sport"] == sport]
 league = st.selectbox(
     "Liga",
-    options=list(config.LEAGUES),
+    options=league_options,
     format_func=lambda code: config.LEAGUES[code]["name"],
 )
 
@@ -147,61 +152,88 @@ else:
     )
 
 if st.button("Predecir", type="primary"):
+    is_baseball = sport == "baseball"
+
     with st.spinner("Calculando ratings y probabilidades..."):
         live_row, poisson_model = dataset.build_live_features(matches, home_team, away_team, league)
         model, feature_columns = _load_model(league)
         probs = xgb_model.predict_proba(model, live_row, feature_columns)[0]  # (away, draw, home)
         p_away, p_draw, p_home = probs
 
-    st.subheader("Probabilidades 1X2")
-    m1, m2, m3 = st.columns(3)
-    m1.metric(f"Gana {home_team}", f"{p_home:.1%}")
-    m2.metric("Empate", f"{p_draw:.1%}")
-    m3.metric(f"Gana {away_team}", f"{p_away:.1%}")
+    if is_baseball:
+        # MLB never draws, so the 3-class classifier's draw output should
+        # come out ~0 on real data (verified empirically before shipping
+        # this) — no separate binary model needed, just no "Empate" column
+        # shown since it would always read ~0%.
+        st.subheader("Probabilidad de victoria")
+        m1, m2 = st.columns(2)
+        m1.metric(f"Gana {home_team}", f"{p_home:.1%}")
+        m2.metric(f"Gana {away_team}", f"{p_away:.1%}")
+    else:
+        st.subheader("Probabilidades 1X2")
+        m1, m2, m3 = st.columns(3)
+        m1.metric(f"Gana {home_team}", f"{p_home:.1%}")
+        m2.metric("Empate", f"{p_draw:.1%}")
+        m3.metric(f"Gana {away_team}", f"{p_away:.1%}")
 
-    # Draw being the single most-likely outcome (beating both home and away)
-    # is genuinely rare in this model — checked empirically across ~300
-    # matchups for E0, it essentially never happens even in close games,
-    # since home/away probabilities are rarely both below it at once. A
-    # league-relative threshold (comfortably above that league's own
-    # historical draw rate) actually fires for real "unusually draw-prone"
-    # matchups instead.
-    league_draw_rate = matches["result"].eq("D").mean()
-    if p_draw > league_draw_rate + 0.05:
-        st.info(
-            f"⚖️ Este partido tiene una probabilidad de empate notablemente alta ({p_draw:.1%} vs. "
-            f"{league_draw_rate:.1%} de tasa histórica en esta liga) — el empate es el resultado más "
-            "difícil de acertar, pero también el que más suele subestimar el mercado de apuestas."
-        )
+        # Draw being the single most-likely outcome (beating both home and
+        # away) is genuinely rare in this model — checked empirically across
+        # ~300 matchups for E0, it essentially never happens even in close
+        # games, since home/away probabilities are rarely both below it at
+        # once. A league-relative threshold (comfortably above that league's
+        # own historical draw rate) actually fires for real "unusually
+        # draw-prone" matchups instead. Doesn't apply to baseball, which has
+        # no draws at all.
+        league_draw_rate = matches["result"].eq("D").mean()
+        if p_draw > league_draw_rate + 0.05:
+            st.info(
+                f"⚖️ Este partido tiene una probabilidad de empate notablemente alta ({p_draw:.1%} vs. "
+                f"{league_draw_rate:.1%} de tasa histórica en esta liga) — el empate es el resultado más "
+                "difícil de acertar, pero también el que más suele subestimar el mercado de apuestas."
+            )
+
+    if is_baseball:
+        bar_x = [f"Gana {home_team}", f"Gana {away_team}"]
+        bar_y = [p_home, p_away]
+        bar_colors = ["#2ca02c", "#d62728"]
+    else:
+        bar_x = [f"Gana {home_team}", "Empate", f"Gana {away_team}"]
+        bar_y = [p_home, p_draw, p_away]
+        bar_colors = ["#2ca02c", "#7f7f7f", "#d62728"]
 
     fig_bar = go.Figure(
         go.Bar(
-            x=[f"Gana {home_team}", "Empate", f"Gana {away_team}"],
-            y=[p_home, p_draw, p_away],
-            marker_color=["#2ca02c", "#7f7f7f", "#d62728"],
-            text=[f"{v:.1%}" for v in [p_home, p_draw, p_away]],
+            x=bar_x,
+            y=bar_y,
+            marker_color=bar_colors,
+            text=[f"{v:.1%}" for v in bar_y],
             textposition="auto",
         )
     )
     fig_bar.update_layout(yaxis_tickformat=".0%", showlegend=False, height=350)
     st.plotly_chart(fig_bar, width="stretch")
 
+    unit = "Carreras" if is_baseball else "Goles"
     st.subheader("Marcador más probable (modelo Poisson)")
-    max_goals = 5
-    grid = poisson_model.score_grid(home_team, away_team, max_goals=max_goals)
+    # Baseball teams routinely score well beyond soccer's goal range (MLB
+    # teams average ~4-5 runs/game, with double-digit innings not unusual),
+    # so the scoreline grid needs to cover a much wider range than soccer's
+    # 0-5 to have any real mass past its edges.
+    max_scoreline = 12 if is_baseball else 5
+    grid = poisson_model.score_grid(home_team, away_team, max_goals=max_scoreline)
     fig_heat = go.Figure(
         go.Heatmap(
             z=grid,
-            x=[str(i) for i in range(max_goals + 1)],
-            y=[str(i) for i in range(max_goals + 1)],
+            x=[str(i) for i in range(max_scoreline + 1)],
+            y=[str(i) for i in range(max_scoreline + 1)],
             colorscale="Blues",
             text=np.round(grid * 100, 1),
             texttemplate="%{text}%",
         )
     )
     fig_heat.update_layout(
-        xaxis_title=f"Goles {away_team}",
-        yaxis_title=f"Goles {home_team}",
+        xaxis_title=f"{unit} {away_team}",
+        yaxis_title=f"{unit} {home_team}",
         height=450,
     )
     st.plotly_chart(fig_heat, width="stretch")

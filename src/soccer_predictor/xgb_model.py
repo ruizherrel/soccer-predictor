@@ -34,6 +34,35 @@ def prepare_xy(df: pd.DataFrame, feature_columns: list[str] = FEATURE_COLUMNS) -
     return X, y
 
 
+def _ensure_all_classes_present(
+    X: pd.DataFrame, y: np.ndarray
+) -> tuple[pd.DataFrame, np.ndarray, np.ndarray | None]:
+    """XGBoost's sklearn XGBClassifier hard-requires every class 0..num_class-1
+    to appear at least once in `y` (raises "Invalid classes inferred from
+    unique values of `y`" otherwise) -- true by construction for every
+    soccer league, but baseball genuinely never draws, so MLB's `y` never
+    contains class 1 at all (not just rarely). Appending one synthetic row
+    labeled with the missing class, with sample_weight=0, satisfies that
+    check without influencing the fit at all (a zero sample weight zeroes
+    out that row's gradient/hessian entirely) -- the model still learns its
+    near-0 draw probability from real data elsewhere, not from this row.
+    Returns sample_weight=None (rather than an all-ones array) when nothing
+    was added, so callers can skip passing sample_weight entirely and keep
+    training byte-identical to before this existed -- confirmed empirically
+    that even a no-op all-ones sample_weight can perturb XGBoost's internal
+    binning enough to change the fitted trees on knife-edge data (seen on
+    Copa Libertadores, this project's sparsest league)."""
+    present = set(np.unique(y))
+    missing = sorted(set(RESULT_TO_CLASS.values()) - present)
+    if not missing:
+        return X, y, None
+    filler_rows = X.iloc[[0] * len(missing)].copy()
+    X = pd.concat([X, filler_rows], ignore_index=True)
+    y = np.concatenate([y, missing])
+    weight = np.concatenate([np.ones(len(y) - len(missing)), np.zeros(len(missing))])
+    return X, y, weight
+
+
 def train_xgb(
     df: pd.DataFrame,
     feature_columns: list[str] = FEATURE_COLUMNS,
@@ -42,6 +71,8 @@ def train_xgb(
     early_stopping_rounds: int = config.XGB_EARLY_STOPPING_ROUNDS,
 ) -> XGBClassifier:
     X, y = prepare_xy(df, feature_columns)
+    X, y, sample_weight = _ensure_all_classes_present(X, y)
+    fit_kwargs = {} if sample_weight is None else {"sample_weight": sample_weight}
     params = dict(params or config.XGB_PARAMS)
 
     eval_set = None
@@ -52,9 +83,9 @@ def train_xgb(
 
     model = XGBClassifier(**params)
     if eval_set is not None:
-        model.fit(X, y, eval_set=eval_set, verbose=False)
+        model.fit(X, y, eval_set=eval_set, verbose=False, **fit_kwargs)
     else:
-        model.fit(X, y)
+        model.fit(X, y, **fit_kwargs)
     return model
 
 
