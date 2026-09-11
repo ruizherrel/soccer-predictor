@@ -65,6 +65,46 @@ def _feature_label(column: str, home_team: str, away_team: str, unit: str) -> st
     template = _FEATURE_LABEL_TEMPLATES.get(column, column)
     return template.format(home=home_team, away=away_team, unit=unit)
 
+
+# Popular nicknames fans actually search for, which don't appear anywhere
+# in the underlying data (confirmed live: TheSportsDB has only ever called
+# this club "CD Guadalajara" across every Liga MX season on record, never
+# "Chivas" -- this isn't a data alias bug, the nickname just doesn't exist
+# in any source this project pulls from). Shown in the team dropdowns via
+# format_func so typing the nickname finds the team -- Streamlit's
+# selectbox search filters the format_func-rendered label sent to the
+# frontend, not the underlying option value (confirmed in
+# streamlit/elements/widgets/selectbox.py: `selectbox_proto.options[:] =
+# formatted_options`), so this isn't just cosmetic. Deliberately limited to
+# nicknames unambiguous enough to be confident about; extend as needed.
+TEAM_NICKNAMES: dict[str, str] = {
+    "CD Guadalajara": "Chivas",
+    "América": "Águilas",
+    "Cruz Azul": "La Máquina",
+    "Monterrey": "Rayados",
+    "Tijuana": "Xolos",
+    "Pachuca": "Tuzos",
+    "Toluca": "Diablos Rojos",
+}
+
+
+def _team_display_name(name: str) -> str:
+    nickname = TEAM_NICKNAMES.get(name)
+    return f"{name} ({nickname})" if nickname else name
+
+
+# Below this market-implied probability, this model has been observed
+# (live testing, 2026-09-11: Real Madrid vs. Vallecano's away win at 4.3%
+# market-implied showed a model probability of 11%; Levante vs. Barcelona's
+# home win at 6.3% showed 23.6%; Chelsea vs. Hull's away win at 8.5% showed
+# 22.3%) to substantially overestimate a big underdog's chances relative to
+# the market -- a known weakness of tree ensembles on rare/extreme outcomes
+# (few blowout examples in training data). A large "edge" entirely driven
+# by this effect is much more likely to be model miscalibration than real
+# value, so it's excluded from the value-bet highlight below (but still
+# shown in the table for transparency).
+MIN_MARKET_PROB_FOR_VALUE_ALERT = 0.15
+
 st.set_page_config(page_title="Predictor de fútbol", page_icon="⚽")
 st.title("⚽ Predictor de partidos")
 
@@ -171,9 +211,11 @@ teams = sorted(set(matches["home_team"]) | set(matches["away_team"]))
 
 col1, col2 = st.columns(2)
 with col1:
-    home_team = st.selectbox("Equipo local", teams, index=0)
+    home_team = st.selectbox("Equipo local", teams, index=0, format_func=_team_display_name)
 with col2:
-    away_team = st.selectbox("Equipo visitante", teams, index=min(1, len(teams) - 1))
+    away_team = st.selectbox(
+        "Equipo visitante", teams, index=min(1, len(teams) - 1), format_func=_team_display_name
+    )
 
 if home_team == away_team:
     st.warning("Elige dos equipos distintos.")
@@ -345,15 +387,22 @@ if st.button("Predecir", type="primary"):
                     if key not in raw_implied:
                         continue
                     model_prob = model_prob_by_outcome[key]
+                    market_prob = raw_implied[key] / norm_factor
                     edge = model_prob * dec_odds - 1.0
+                    low_confidence = market_prob < MIN_MARKET_PROB_FOR_VALUE_ALERT
                     computed.append(
                         {
                             "label": label,
                             "dec_odds": dec_odds,
-                            "market_prob": raw_implied[key] / norm_factor,
+                            "market_prob": market_prob,
                             "model_prob": model_prob,
                             "edge": edge,
-                            "kelly_pct": value_betting.kelly_fraction(model_prob, dec_odds, cap=0.05),
+                            "low_confidence": low_confidence,
+                            # Zeroed rather than just unhighlighted -- suggesting a
+                            # Kelly stake here would contradict not trusting this edge.
+                            "kelly_pct": 0.0 if low_confidence else value_betting.kelly_fraction(
+                                model_prob, dec_odds, cap=0.05
+                            ),
                         }
                     )
 
@@ -378,7 +427,8 @@ if st.button("Predecir", type="primary"):
                     width="stretch",
                 )
 
-                value_bets = [c for c in computed if c["edge"] > 0]
+                value_bets = [c for c in computed if c["edge"] > 0 and not c["low_confidence"]]
+                low_confidence_value_bets = [c for c in computed if c["edge"] > 0 and c["low_confidence"]]
                 if value_bets:
                     best = max(value_bets, key=lambda c: c["edge"])
                     st.success(
@@ -386,10 +436,18 @@ if st.button("Predecir", type="primary"):
                         f"contra una cuota de {best['dec_odds']:.2f} (el mercado implica {best['market_prob']:.1%}) "
                         f"— edge de {best['edge']:+.1%}."
                     )
+                elif low_confidence_value_bets:
+                    worst = max(low_confidence_value_bets, key=lambda c: c["edge"])
+                    st.warning(
+                        f"⚠️ Hay un edge positivo en **{worst['label']}** ({worst['edge']:+.1%}), pero la "
+                        f"probabilidad de mercado es muy baja ({worst['market_prob']:.1%}, un desfavorito "
+                        "marcado) — en partidos muy desparejos el modelo tiende a sobreestimar al equipo "
+                        "débil, así que no se resalta como apuesta de valor."
+                    )
                 else:
                     st.caption(
                         "Sin valor detectado: el mercado ya iguala o supera la probabilidad del modelo en los "
-                        "tres resultados."
+                        "resultados evaluados."
                     )
                 st.caption(
                     "Las cuotas de mercado son un baseline históricamente difícil de vencer — exige un edge "
