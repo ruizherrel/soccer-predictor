@@ -49,3 +49,14 @@ def test_multiclass_log_loss_runs_and_is_positive_for_imperfect_predictions():
     outcome_idx = np.array([2, 0])
     loss = multiclass_log_loss(probs, outcome_idx)
     assert loss > 0.0
+
+
+def test_multiclass_log_loss_tolerates_tiny_negative_floating_point_noise():
+    # sklearn's log_loss hard-rejects any negative probability, even a
+    # ~1e-12 rounding artifact -- seen in production from the Poisson
+    # model's ridge-regularized fallback fit on Copa Libertadores. Real
+    # model output should never be more negative than this.
+    probs = np.array([[-6.238881808718773e-12, 0.4, 0.6]])
+    outcome_idx = np.array([2])
+    loss = multiclass_log_loss(probs, outcome_idx)
+    assert loss > 0.0

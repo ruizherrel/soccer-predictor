@@ -38,4 +38,11 @@ def mean_rps(probs: np.ndarray, outcome_idx: np.ndarray) -> float:
 
 
 def multiclass_log_loss(probs: np.ndarray, outcome_idx: np.ndarray) -> float:
+    # sklearn's log_loss hard-rejects any negative entry, even a
+    # floating-point artifact many orders of magnitude below zero (seen in
+    # practice from the Poisson model's ridge-regularized fallback fit on
+    # Copa Libertadores, already documented as numerically unstable on
+    # sparse competitions) -- clip rather than let a ~1e-12 rounding error
+    # crash the whole backtest.
+    probs = np.clip(probs, 0.0, 1.0)
     return float(sk_log_loss(outcome_idx, probs, labels=list(range(probs.shape[1]))))

@@ -19,6 +19,15 @@ from . import xgb_model
 from .metrics import mean_rps, multiclass_log_loss
 from .xgb_model import RESULT_TO_CLASS
 
+try:
+    from . import catboost_model
+
+    _HAS_CATBOOST = True
+except ImportError:
+    # catboost is an optional, backtest-only dependency (see
+    # catboost_model.py's module docstring) -- not installed by default.
+    _HAS_CATBOOST = False
+
 
 def odds_implied_probs(df: pd.DataFrame) -> np.ndarray | None:
     """Overround-normalized implied probabilities from Bet365 closing odds,
@@ -43,7 +52,20 @@ def _score(name: str, season: str, probs: np.ndarray, outcome_idx: np.ndarray) -
     }
 
 
-def run_backtest(features: pd.DataFrame, warmup_seasons: int = config.WARMUP_SEASONS) -> pd.DataFrame:
+def run_backtest(
+    features: pd.DataFrame,
+    warmup_seasons: int = config.WARMUP_SEASONS,
+    league: str | None = None,
+    include_catboost: bool = True,
+) -> pd.DataFrame:
+    """`league` resolves the right feature set via
+    xgb_model.feature_columns_for_league (e.g. MLB's extra Pythagorean
+    columns) for both training and prediction -- passing the wrong league
+    (or None for a league that needs it) would silently train/score on the
+    wrong columns. `include_catboost` adds a CatBoost comparison row per
+    season when the optional `catboost` package is installed (see
+    catboost_model.py); set False to skip it even when installed."""
+    feature_columns = xgb_model.feature_columns_for_league(league)
     seasons_order = (
         features.sort_values("date")["season"].drop_duplicates().tolist()
     )
@@ -60,9 +82,14 @@ def run_backtest(features: pd.DataFrame, warmup_seasons: int = config.WARMUP_SEA
         poisson_probs = test_df[["poisson_p_away", "poisson_p_draw", "poisson_p_home"]].to_numpy()
         rows.append(_score("poisson", season, poisson_probs, outcome_idx))
 
-        model = xgb_model.train_xgb_with_early_stopping(train_df)
-        xgb_probs = xgb_model.predict_proba(model, test_df)
+        model = xgb_model.train_xgb_with_early_stopping(train_df, feature_columns)
+        xgb_probs = xgb_model.predict_proba(model, test_df, feature_columns)
         rows.append(_score("xgboost", season, xgb_probs, outcome_idx))
+
+        if include_catboost and _HAS_CATBOOST:
+            cb_model = catboost_model.train_catboost(train_df, feature_columns)
+            cb_probs = catboost_model.predict_proba(cb_model, test_df, feature_columns)
+            rows.append(_score("catboost", season, cb_probs, outcome_idx))
 
         market_probs = odds_implied_probs(test_df)
         if market_probs is not None:

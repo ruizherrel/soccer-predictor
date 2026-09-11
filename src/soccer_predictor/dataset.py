@@ -249,6 +249,32 @@ def build_poisson_features(
     return pd.concat(frames, ignore_index=True)
 
 
+def add_pythagorean_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Bill James' Pythagorean win expectation, computed from each side's
+    already-causal rolling goals-for/against (home_gf_last10 etc. from
+    form_features.py) rather than a separate season-to-date aggregate --
+    reuses features that already exist and are already leakage-tested,
+    instead of adding a second, parallel causal computation.
+
+    Cheap to compute for every league (pure arithmetic on existing columns),
+    but only ever added to a model's actual feature set for leagues with
+    config.LEAGUES[league]["use_pythagorean"] set (currently just MLB) --
+    see xgb_model.feature_columns_for_league. Division by zero when a team
+    has conceded nothing in its last 10 (or hasn't played 10 yet) is
+    expected and yields NaN, which XGBoost handles natively.
+    """
+    df = df.copy()
+    with np.errstate(divide="ignore", invalid="ignore"):
+        home_num = df["home_gf_last10"] ** config.PYTH_EXPONENT
+        home_den = home_num + df["home_ga_last10"] ** config.PYTH_EXPONENT
+        away_num = df["away_gf_last10"] ** config.PYTH_EXPONENT
+        away_den = away_num + df["away_ga_last10"] ** config.PYTH_EXPONENT
+        df["pyth_home_pct"] = home_num / home_den
+        df["pyth_away_pct"] = away_num / away_den
+    df["pyth_diff"] = df["pyth_home_pct"] - df["pyth_away_pct"]
+    return df
+
+
 def build_features(matches: pd.DataFrame, league: str | None = None) -> pd.DataFrame:
     matches = matches.sort_values("date").reset_index(drop=True)
     seasons_order = _season_order(matches)
@@ -271,6 +297,7 @@ def build_features(matches: pd.DataFrame, league: str | None = None) -> pd.DataF
         on=["date", "home_team", "away_team"],
         how="left",
     )
+    out = add_pythagorean_features(out)
 
     # Altitude/travel are static per team pair (no match history involved),
     # so no leakage risk in computing them directly rather than causally.
@@ -351,4 +378,5 @@ def build_live_features(
         "poisson_lambda_home": lam,
         "poisson_lambda_away": mu,
     }
-    return pd.DataFrame([row]), poisson_model
+    row_df = add_pythagorean_features(pd.DataFrame([row]))
+    return row_df, poisson_model

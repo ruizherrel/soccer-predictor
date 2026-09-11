@@ -18,10 +18,52 @@ for _p in (_ROOT, _ROOT / "src"):
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+import shap
 import streamlit as st
 
 import config
-from soccer_predictor import dataset, ingest, xgb_model
+from soccer_predictor import dataset, ingest, odds, value_betting, xgb_model
+
+# Spanish labels for the SHAP explanation panel, with {home}/{away}
+# placeholders filled in with the actual team names at prediction time.
+# Kept in sync by hand with xgb_model.FEATURE_COLUMNS and
+# xgb_model.PYTHAGOREAN_FEATURE_COLUMNS; any feature column missing here
+# just falls back to its raw name (see _feature_label) instead of crashing.
+_FEATURE_LABEL_TEMPLATES = {
+    "elo_home": "Rating Elo de {home}",
+    "elo_away": "Rating Elo de {away}",
+    "elo_diff": "Diferencia de Elo (local − visitante)",
+    "pi_home": "Pi-rating de {home}",
+    "pi_away": "Pi-rating de {away}",
+    "pi_diff": "Diferencia de Pi-rating (local − visitante)",
+    "home_ppg_last5": "Puntos por partido de {home} (últimos 5)",
+    "home_gf_last5": "{unit} a favor de {home} (últimos 5)",
+    "home_ga_last5": "{unit} en contra de {home} (últimos 5)",
+    "home_ppg_last10": "Puntos por partido de {home} (últimos 10)",
+    "home_gf_last10": "{unit} a favor de {home} (últimos 10)",
+    "home_ga_last10": "{unit} en contra de {home} (últimos 10)",
+    "home_rest_days": "Días de descanso de {home}",
+    "away_ppg_last5": "Puntos por partido de {away} (últimos 5)",
+    "away_gf_last5": "{unit} a favor de {away} (últimos 5)",
+    "away_ga_last5": "{unit} en contra de {away} (últimos 5)",
+    "away_ppg_last10": "Puntos por partido de {away} (últimos 10)",
+    "away_gf_last10": "{unit} a favor de {away} (últimos 10)",
+    "away_ga_last10": "{unit} en contra de {away} (últimos 10)",
+    "away_rest_days": "Días de descanso de {away}",
+    "poisson_lambda_home": "{unit} esperados (Poisson) de {home}",
+    "poisson_lambda_away": "{unit} esperados (Poisson) de {away}",
+    "home_altitude_m": "Altitud del estadio de {home}",
+    "altitude_delta_m": "Diferencia de altitud (local − visitante)",
+    "away_travel_km": "Distancia de viaje de {away}",
+    "pyth_home_pct": "Expectativa Pitagórica de {home}",
+    "pyth_away_pct": "Expectativa Pitagórica de {away}",
+    "pyth_diff": "Diferencia Pitagórica (local − visitante)",
+}
+
+
+def _feature_label(column: str, home_team: str, away_team: str, unit: str) -> str:
+    template = _FEATURE_LABEL_TEMPLATES.get(column, column)
+    return template.format(home=home_team, away=away_team, unit=unit)
 
 st.set_page_config(page_title="Predictor de fútbol", page_icon="⚽")
 st.title("⚽ Predictor de partidos")
@@ -76,6 +118,12 @@ def _load_model(league: str):
     return xgb_model.load_model(league)
 
 
+@st.cache_resource
+def _load_explainer(league: str):
+    model, _feature_columns = _load_model(league)
+    return shap.TreeExplainer(model)
+
+
 @st.cache_data(ttl=6 * 3600)
 def _load_upcoming_fixtures(league: str):
     # This is a nice-to-have (tells the user whether the matchup is a real
@@ -88,6 +136,14 @@ def _load_upcoming_fixtures(league: str):
     except Exception:
         logging.getLogger(__name__).exception("fetch_upcoming_fixtures failed for %s", league)
         return pd.DataFrame(columns=["date", "home_team", "away_team"])
+
+
+@st.cache_data(ttl=6 * 3600)
+def _load_odds(league: str):
+    # odds.fetch_odds already never raises internally (see its docstring),
+    # but the same "third-party API must never take down the prediction"
+    # principle applies here as for _load_upcoming_fixtures above.
+    return odds.fetch_odds(league)
 
 
 SPORT_OPTIONS = {"⚽ Fútbol": "soccer", "⚾ Béisbol": "baseball"}
@@ -153,6 +209,7 @@ else:
 
 if st.button("Predecir", type="primary"):
     is_baseball = sport == "baseball"
+    unit = "Carreras" if is_baseball else "Goles"
 
     with st.spinner("Calculando ratings y probabilidades..."):
         live_row, poisson_model = dataset.build_live_features(matches, home_team, away_team, league)
@@ -213,7 +270,132 @@ if st.button("Predecir", type="primary"):
     fig_bar.update_layout(yaxis_tickformat=".0%", showlegend=False, height=350)
     st.plotly_chart(fig_bar, width="stretch")
 
-    unit = "Carreras" if is_baseball else "Goles"
+    with st.expander("🔍 ¿Por qué esta predicción?"):
+        outcome_names = [away_team, "Empate", home_team]  # CLASS_ORDER = (away, draw, home)
+        predicted_idx = int(np.argmax(probs))
+        predicted_label = outcome_names[predicted_idx]
+
+        explainer = _load_explainer(league)
+        shap_exp = explainer(live_row[feature_columns])
+        shap_row = shap_exp.values[0, :, predicted_idx]
+
+        imp_df = pd.DataFrame(
+            {
+                "label": [_feature_label(c, home_team, away_team, unit) for c in feature_columns],
+                "shap": shap_row,
+            }
+        ).dropna(subset=["shap"])
+        imp_df["abs_shap"] = imp_df["shap"].abs()
+        top_imp = imp_df.sort_values("abs_shap", ascending=False).head(8).sort_values("shap")
+
+        if top_imp.empty:
+            st.caption("No hay suficiente información disponible para explicar esta predicción.")
+        else:
+            st.caption(
+                f"Variables que más influyeron en que el modelo prediga **{predicted_label}** "
+                "(valores SHAP). Verde = empuja hacia esa predicción, rojo = empuja en contra."
+            )
+            fig_shap = go.Figure(
+                go.Bar(
+                    x=top_imp["shap"],
+                    y=top_imp["label"],
+                    orientation="h",
+                    marker_color=["#2ca02c" if v > 0 else "#d62728" for v in top_imp["shap"]],
+                )
+            )
+            fig_shap.update_layout(
+                height=350,
+                margin=dict(l=10, r=10, t=20, b=10),
+                xaxis_title=f"Impacto en la predicción de '{predicted_label}'",
+            )
+            st.plotly_chart(fig_shap, width="stretch")
+
+    # Market odds only exist for real scheduled matches -- a hypothetical
+    # matchup (fixture_date is None) has nothing to compare against, so
+    # this section only ever renders alongside a confirmed real fixture.
+    if fixture_date is not None:
+        if not odds.is_configured():
+            st.caption(
+                "💰 Para comparar contra cuotas de mercado y ver apuestas de valor (+EV), configura "
+                "`ODDS_API_KEY` (gratis hasta 500 consultas/mes en the-odds-api.com)."
+            )
+        elif league not in odds.SPORT_KEYS:
+            pass  # Genuinely not covered by this provider (e.g. MX2) -- nothing useful to say every time.
+        else:
+            odds_df = _load_odds(league)
+            match_odds = odds.find_match_odds(odds_df, home_team, away_team) if not odds_df.empty else None
+
+            if match_odds is None:
+                st.caption("💰 No se encontraron cuotas de mercado para este partido todavía.")
+            else:
+                model_prob_by_outcome = {"home": p_home, "draw": p_draw, "away": p_away}
+                outcomes = [("home", home_team, match_odds["odds_home"]), ("away", away_team, match_odds["odds_away"])]
+                if not is_baseball:
+                    outcomes.insert(1, ("draw", "Empate", match_odds["odds_draw"]))
+
+                raw_implied = {
+                    key: 1.0 / dec_odds
+                    for key, _label, dec_odds in outcomes
+                    if pd.notna(dec_odds) and dec_odds > 0
+                }
+                norm_factor = sum(raw_implied.values())
+
+                computed = []
+                for key, label, dec_odds in outcomes:
+                    if key not in raw_implied:
+                        continue
+                    model_prob = model_prob_by_outcome[key]
+                    edge = model_prob * dec_odds - 1.0
+                    computed.append(
+                        {
+                            "label": label,
+                            "dec_odds": dec_odds,
+                            "market_prob": raw_implied[key] / norm_factor,
+                            "model_prob": model_prob,
+                            "edge": edge,
+                            "kelly_pct": value_betting.kelly_fraction(model_prob, dec_odds, cap=0.05),
+                        }
+                    )
+
+                st.subheader("💰 Valor esperado vs. cuotas del mercado")
+                st.dataframe(
+                    pd.DataFrame(
+                        [
+                            {
+                                "Resultado": c["label"],
+                                "Cuota": f"{c['dec_odds']:.2f}",
+                                "Prob. mercado": f"{c['market_prob']:.1%}",
+                                "Prob. modelo": f"{c['model_prob']:.1%}",
+                                "Edge": f"{c['edge']:+.1%}",
+                                "Apuesta sugerida (Kelly, tope 5%)": (
+                                    f"{c['kelly_pct']:.1%}" if c["kelly_pct"] > 0 else "—"
+                                ),
+                            }
+                            for c in computed
+                        ]
+                    ),
+                    hide_index=True,
+                    width="stretch",
+                )
+
+                value_bets = [c for c in computed if c["edge"] > 0]
+                if value_bets:
+                    best = max(value_bets, key=lambda c: c["edge"])
+                    st.success(
+                        f"✅ Valor detectado en **{best['label']}**: el modelo le da {best['model_prob']:.1%} "
+                        f"contra una cuota de {best['dec_odds']:.2f} (el mercado implica {best['market_prob']:.1%}) "
+                        f"— edge de {best['edge']:+.1%}."
+                    )
+                else:
+                    st.caption(
+                        "Sin valor detectado: el mercado ya iguala o supera la probabilidad del modelo en los "
+                        "tres resultados."
+                    )
+                st.caption(
+                    "Las cuotas de mercado son un baseline históricamente difícil de vencer — exige un edge "
+                    "cómodo, no marginal, antes de apostar, y nunca apuestes más del % sugerido por Kelly."
+                )
+
     st.subheader("Marcador más probable (modelo Poisson)")
     # Baseball teams routinely score well beyond soccer's goal range (MLB
     # teams average ~4-5 runs/game, with double-digit innings not unusual),

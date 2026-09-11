@@ -23,6 +23,25 @@ FEATURE_COLUMNS = [
     "home_altitude_m", "altitude_delta_m", "away_travel_km",
 ]
 
+# Bill James' Pythagorean win expectation, added on top of FEATURE_COLUMNS
+# only for leagues with config.LEAGUES[league]["use_pythagorean"] set
+# (currently just MLB) -- see dataset.add_pythagorean_features and
+# feature_columns_for_league below. Kept out of the shared FEATURE_COLUMNS
+# list so every other league's trained model stays byte-identical.
+PYTHAGOREAN_FEATURE_COLUMNS = ["pyth_home_pct", "pyth_away_pct", "pyth_diff"]
+
+
+def feature_columns_for_league(league: str | None) -> list[str]:
+    """The actual feature set to train/predict with for a given league:
+    FEATURE_COLUMNS plus any per-league additions. Callers that already have
+    a trained model should prefer the feature_columns saved alongside it
+    (see save_model/load_model) over calling this again, since a league's
+    config could change between training and inference."""
+    cols = list(FEATURE_COLUMNS)
+    if league and config.LEAGUES.get(league, {}).get("use_pythagorean"):
+        cols += PYTHAGOREAN_FEATURE_COLUMNS
+    return cols
+
 # CLASS_ORDER is (away, draw, home); result column is football-data.co.uk's
 # native H/D/A code.
 RESULT_TO_CLASS = {"A": 0, "D": 1, "H": 2}
@@ -110,8 +129,8 @@ def predict_proba(model: XGBClassifier, df: pd.DataFrame, feature_columns: list[
     return model.predict_proba(df[feature_columns])
 
 
-def save_model(model: XGBClassifier, league: str) -> None:
-    payload = {"model": model, "feature_columns": FEATURE_COLUMNS, "class_order": CLASS_ORDER}
+def save_model(model: XGBClassifier, league: str, feature_columns: list[str] = FEATURE_COLUMNS) -> None:
+    payload = {"model": model, "feature_columns": feature_columns, "class_order": CLASS_ORDER}
     joblib.dump(payload, config.model_path(league))
 
 

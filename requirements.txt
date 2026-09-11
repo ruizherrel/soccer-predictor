@@ -9,3 +9,4 @@ requests~=2.32
 plotly~=5.24
 streamlit
 xgboost>=3.4
+shap>=0.45

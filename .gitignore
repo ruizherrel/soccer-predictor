@@ -9,3 +9,4 @@ models/*.joblib
 .ipynb_checkpoints/
 .venv/
 *.egg-info/
+.streamlit/secrets.toml

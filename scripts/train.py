@@ -30,8 +30,9 @@ if __name__ == "__main__":
             print(f"{len(features)} rows, {features['season'].nunique()} seasons")
 
             print("Training XGBoost on all history...")
-            model = xgb_model.train_xgb_with_early_stopping(features)
-            xgb_model.save_model(model, league)
+            feature_columns = xgb_model.feature_columns_for_league(league)
+            model = xgb_model.train_xgb_with_early_stopping(features, feature_columns)
+            xgb_model.save_model(model, league, feature_columns)
             print(f"Model saved to {config.model_path(league)}\n")
         except Exception as exc:
             print(f"FAILED: {exc}\n")

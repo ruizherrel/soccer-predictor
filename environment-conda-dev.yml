@@ -17,3 +17,7 @@ dependencies:
   - pip
   - pip:
       - xgboost>=3.4
+      - shap>=0.45
+      # catboost is backtest-only (see src/soccer_predictor/catboost_model.py) --
+      # not in requirements.txt since the deployed Streamlit app never loads it.
+      - catboost>=1.2

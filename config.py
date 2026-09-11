@@ -126,6 +126,16 @@ LEAGUES = {
         # for a low-score bias that has no equivalent justification in
         # baseball's scoring dynamics (no draws, different run distribution).
         "use_dixon_coles": False,
+        # Bill James' Pythagorean win expectation (runs-for^1.83 /
+        # (runs-for^1.83 + runs-against^1.83)) is a data-efficient predictor
+        # of win rate for high-scoring sports (Almeida, Dayaratna, Miller &
+        # Yang, in Blondin et al. 2025, "Artificial Intelligence,
+        # Optimization, and Data Sciences in Sports"), which is exactly
+        # MLB's situation here: short history (2025+ only) where Elo/Pi
+        # ratings haven't had many games to converge. The same paper notes
+        # the formula does noticeably worse in low-scoring sports with
+        # draws, like soccer, so this stays off for every other league.
+        "use_pythagorean": True,
         "notice": (
             "Datos incompletos: TheSportsDB (la única fuente gratuita "
             "disponible) solo tiene historial de MLB desde 2025, y su "
@@ -176,6 +186,12 @@ FORM_WINDOWS = (5, 10)
 
 # --- Poisson / Dixon-Coles ---
 DIXON_COLES_XI = 0.002  # time-decay rate per day (~1yr half life)
+
+# --- Pythagorean win expectation (baseball only, see LEAGUES[...]["use_pythagorean"]) ---
+# Bill James' original exponent was 2; 1.83 is the empirically best-fitting
+# value for MLB (used by Baseball Reference, confirmed as the strongest
+# single-exponent predictor across 1994-2023 by Almeida et al. 2025).
+PYTH_EXPONENT = 1.83
 
 # --- XGBoost ---
 # n_estimators is a ceiling, not a target: training always uses early

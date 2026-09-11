@@ -30,7 +30,16 @@ if __name__ == "__main__":
         print(f"=== {config.LEAGUES[league]['name']} ({league}) ===")
 
         features = dataset.load_features(league)
-        results = backtest.run_backtest(features)
+        results = backtest.run_backtest(features, league=league)
+
+        if results.empty:
+            # Happens when a league has config.WARMUP_SEASONS or fewer total
+            # seasons (currently just MLB, with 2 seasons and a warmup of
+            # 2) -- every season gets skipped as Elo/Pi/form warmup, leaving
+            # nothing to backtest yet. Not an error; just nothing to report
+            # until more seasons of data accumulate.
+            print(f"\nSin temporadas suficientes para backtest todavía (se requieren > {config.WARMUP_SEASONS}).\n")
+            continue
 
         print("\nPor temporada:")
         print(results.pivot(index="season", columns="model", values="mean_rps"))
