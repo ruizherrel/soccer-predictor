@@ -444,6 +444,20 @@ if st.button("Predecir", type="primary"):
                         f"contra una cuota de {best['dec_odds']:.2f} (el mercado implica {best['market_prob']:.1%}) "
                         f"— edge de {best['edge']:+.1%}."
                     )
+                    # "Valor" (edge positivo) y "favorito" (mayor probabilidad
+                    # de ganar) son preguntas distintas -- el valor casi
+                    # siempre aparece en el no-favorito, porque ahí es donde
+                    # modelo y mercado tienen más margen para no coincidir.
+                    # Sin esta aclaración, el banner verde se puede leer como
+                    # "este equipo va a ganar", que no es lo que dice.
+                    favorite = max(computed, key=lambda c: c["model_prob"])
+                    if favorite["label"] != best["label"]:
+                        st.warning(
+                            f"⚠️ Este valor no es sobre el resultado favorito: el modelo sigue viendo a "
+                            f"**{favorite['label']}** como el más probable de ganar ({favorite['model_prob']:.1%}). "
+                            f"El edge en {best['label']} es sobre el precio de esa apuesta específica, no una "
+                            "predicción de que ese resultado vaya a ocurrir."
+                        )
                 elif low_confidence_value_bets:
                     worst = max(low_confidence_value_bets, key=lambda c: c["edge"])
                     st.warning(
