@@ -10,7 +10,7 @@ import pandas as pd
 import config
 from . import geo
 from .elo import EloRatingSystem
-from .form_features import attach_form_features, current_form
+from .form_features import attach_form_features, attach_venue_form_features, current_form, current_venue_form
 from .pi_ratings import PiRatingSystem
 from .poisson_model import PoissonGoalModel
 
@@ -297,6 +297,21 @@ def build_features(matches: pd.DataFrame, league: str | None = None) -> pd.DataF
         on=["date", "home_team", "away_team"],
         how="left",
     )
+
+    # Venue-specific rolling form (home team's own home-venue record, away
+    # team's own away-venue record) merged as its own step, after the
+    # mixed-venue form merge above -- its home_venue_/away_venue_ columns
+    # also start with "home_"/"away_" and would get swept up and
+    # duplicate-merged by form_cols' prefix-based selection otherwise (same
+    # reason altitude/travel are appended separately below).
+    venue_form = attach_venue_form_features(matches)
+    venue_form_cols = [c for c in venue_form.columns if c.startswith("home_venue_") or c.startswith("away_venue_")]
+    out = out.merge(
+        venue_form[["date", "home_team", "away_team", *venue_form_cols]],
+        on=["date", "home_team", "away_team"],
+        how="left",
+    )
+
     out = add_pythagorean_features(out)
 
     # Altitude/travel are static per team pair (no match history involved),
@@ -345,6 +360,8 @@ def build_live_features(
 
     home_form = current_form(matches, home_team)
     away_form = current_form(matches, away_team)
+    home_venue_form = current_venue_form(matches, home_team, "home")
+    away_venue_form = current_venue_form(matches, away_team, "away")
 
     league_cfg = config.LEAGUES.get(league, {}) if league else {}
     use_dixon_coles = league_cfg.get("use_dixon_coles", True)
@@ -374,6 +391,14 @@ def build_live_features(
         "away_gf_last10": away_form["gf_last10"],
         "away_ga_last10": away_form["ga_last10"],
         "away_rest_days": away_form["rest_days"],
+        "home_venue_gf_last5": home_venue_form["gf_last5"],
+        "home_venue_ga_last5": home_venue_form["ga_last5"],
+        "home_venue_gf_last10": home_venue_form["gf_last10"],
+        "home_venue_ga_last10": home_venue_form["ga_last10"],
+        "away_venue_gf_last5": away_venue_form["gf_last5"],
+        "away_venue_ga_last5": away_venue_form["ga_last5"],
+        "away_venue_gf_last10": away_venue_form["gf_last10"],
+        "away_venue_ga_last10": away_venue_form["ga_last10"],
         **geo.altitude_features(home_team, away_team),
         "poisson_lambda_home": lam,
         "poisson_lambda_away": mu,

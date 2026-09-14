@@ -17,6 +17,21 @@ FEATURE_COLUMNS = [
     "home_ppg_last10", "home_gf_last10", "home_ga_last10", "home_rest_days",
     "away_ppg_last5", "away_gf_last5", "away_ga_last5",
     "away_ppg_last10", "away_gf_last10", "away_ga_last10", "away_rest_days",
+    # Home team's goals for/against specifically in their own past home
+    # matches, and away team's specifically in their own past away matches
+    # -- distinct from the mixed-venue gf_last5/ga_last5 above, which blend
+    # a team's home and away appearances together. Added after real-world
+    # evidence (a manual quiniela-prediction process, tracked jornada by
+    # jornada) that this signal caught upsets neither the general form
+    # features nor an external AI model's probability output picked up on.
+    # Applies to every league (not gated like Pythagorean below): the
+    # underlying phenomenon -- teams performing differently at each venue
+    # beyond the league-average home advantage -- isn't sport- or
+    # league-specific the way Pythagorean's low-scoring-sport weakness is.
+    "home_venue_gf_last5", "home_venue_ga_last5",
+    "home_venue_gf_last10", "home_venue_ga_last10",
+    "away_venue_gf_last5", "away_venue_ga_last5",
+    "away_venue_gf_last10", "away_venue_ga_last10",
     "poisson_lambda_home", "poisson_lambda_away",
     # NaN for every team without a known home-city location (currently:
     # every non-Mexico team) — XGBoost handles missing values natively.
