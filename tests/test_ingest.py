@@ -1,6 +1,6 @@
 import pandas as pd
 
-from soccer_predictor.ingest import _names_roughly_match, find_upcoming_fixture
+from soccer_predictor.ingest import _names_roughly_match, _thesportsdb_normalize, find_upcoming_fixture
 
 
 def test_names_roughly_match_exact():
@@ -56,3 +56,31 @@ def test_find_upcoming_fixture_returns_none_when_not_scheduled():
 def test_find_upcoming_fixture_handles_empty_fixtures():
     fixtures = pd.DataFrame(columns=["date", "home_team", "away_team"])
     assert find_upcoming_fixture(fixtures, "Barcelona", "Sevilla") is None
+
+
+def test_thesportsdb_normalize_renames_known_teams_for_football_data_leagues():
+    # Used when the current season is backfilled from TheSportsDB (see
+    # ingest.refresh's football-data.co.uk/mirror fallback) -- these must
+    # rename to football-data.co.uk's own established name, not just be
+    # recognized as equivalent, so a team's Elo/Pi rating history doesn't
+    # fragment into two different dict keys.
+    assert _thesportsdb_normalize("SP1", "Atlético Madrid") == "Ath Madrid"
+    assert _thesportsdb_normalize("E0", "Manchester United") == "Man United"
+    assert _thesportsdb_normalize("D1", "Borussia Mönchengladbach") == "M'gladbach"
+    assert _thesportsdb_normalize("F1", "Paris Saint-Germain") == "Paris SG"
+
+
+def test_thesportsdb_normalize_disambiguates_inter_milan_from_ac_milan():
+    # "Inter Milan" fuzzy-substring-matches both "Inter" and "Milan" -- a
+    # real false-positive risk (AC Milan and Inter are different clubs).
+    # This must resolve to "Inter", not "Milan".
+    assert _thesportsdb_normalize("I1", "Inter Milan") == "Inter"
+    assert _thesportsdb_normalize("I1", "AC Milan") == "Milan"
+
+
+def test_thesportsdb_normalize_leaves_a_team_with_no_prior_history_unchanged():
+    # Newly promoted/returned clubs with zero football-data.co.uk history
+    # (this season: Coventry City, Racing de Santander, Elversberg, Le
+    # Mans) have no established name to rename to -- kept as TheSportsDB's
+    # own name so Elo/Pi's existing new-team seeding applies.
+    assert _thesportsdb_normalize("SP1", "Racing de Santander") == "Racing de Santander"

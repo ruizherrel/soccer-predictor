@@ -211,6 +211,64 @@ def _normalize_lib_team(name: str) -> str:
     return LIB_TEAM_NAME_MAP.get(name, name)
 
 
+# TheSportsDB -> football-data.co.uk's own established name, for the 5
+# leagues whose historical data comes from football-data.co.uk but whose
+# in-progress current season (fetch_raw_thesportsdb_season, used as a
+# fallback in refresh() when football-data.co.uk/its GitHub mirror don't
+# have the new season yet) comes from TheSportsDB instead. Built by
+# enumerating every team TheSportsDB returned for the 2026-2027 season and
+# manually matching each to football-data.co.uk's team list (2026-09-16) --
+# needed even for teams a fuzzy substring match would already resolve,
+# because ingestion needs an exact rename (not a "these are probably the
+# same" fuzzy check) to avoid silently fragmenting a team's Elo/Pi rating
+# history into two different dict keys. A team with no entry here and no
+# football-data.co.uk history at all (e.g. this season: Coventry City,
+# Racing de Santander, Elversberg, Le Mans -- newly promoted/returned, no
+# prior top-flight data to rename to) is left as TheSportsDB's own name and
+# correctly seeded as a new team by Elo/Pi's existing logic.
+E0_TEAM_NAME_MAP: dict[str, str] = {
+    "Brighton and Hove Albion": "Brighton",
+    "Hull City": "Hull",
+    "Ipswich Town": "Ipswich",
+    "Leeds United": "Leeds",
+    "Manchester City": "Man City",
+    "Manchester United": "Man United",
+    "Newcastle United": "Newcastle",
+    "Nottingham Forest": "Nott'm Forest",
+    "Tottenham Hotspur": "Tottenham",
+}
+SP1_TEAM_NAME_MAP: dict[str, str] = {
+    "Athletic Bilbao": "Ath Bilbao",
+    "Atlético Madrid": "Ath Madrid",
+    "Celta Vigo": "Celta",
+    "Deportivo Alavés": "Alaves",
+    "Deportivo de A Coruña": "La Coruna",
+    "Espanyol": "Espanol",
+    "Málaga": "Malaga",
+    "Rayo Vallecano": "Vallecano",
+    "Real Betis": "Betis",
+    "Real Sociedad": "Sociedad",
+}
+D1_TEAM_NAME_MAP: dict[str, str] = {
+    "Bayer Leverkusen": "Leverkusen",
+    "Borussia Dortmund": "Dortmund",
+    "Borussia Mönchengladbach": "M'gladbach",
+    "Eintracht Frankfurt": "Ein Frankfurt",
+    "Köln": "FC Koln",
+}
+# "Inter Milan" fuzzy-substring-matches BOTH "Inter" and "Milan" (AC Milan's
+# football-data.co.uk name) -- the exact false-positive risk already noted
+# elsewhere in this project (dataset.py's UCL_DOMESTIC_TEAM_MAP comment).
+# Mapped explicitly here rather than relying on any fuzzy resolution.
+I1_TEAM_NAME_MAP: dict[str, str] = {
+    "AC Milan": "Milan",
+    "Inter Milan": "Inter",
+}
+F1_TEAM_NAME_MAP: dict[str, str] = {
+    "Paris Saint-Germain": "Paris SG",
+}
+
+
 _RAW_COLUMNS = {
     "Date": "date",
     "HomeTeam": "home_team",
@@ -382,6 +440,16 @@ def _thesportsdb_normalize(league: str, name: str) -> str:
         return _normalize_mx2_team(name)
     if league == "LIB":
         return _normalize_lib_team(name)
+    if league == "E0":
+        return E0_TEAM_NAME_MAP.get(name, name)
+    if league == "SP1":
+        return SP1_TEAM_NAME_MAP.get(name, name)
+    if league == "D1":
+        return D1_TEAM_NAME_MAP.get(name, name)
+    if league == "I1":
+        return I1_TEAM_NAME_MAP.get(name, name)
+    if league == "F1":
+        return F1_TEAM_NAME_MAP.get(name, name)
     return name
 
 
@@ -565,7 +633,27 @@ def refresh(league: str) -> pd.DataFrame:
                 continue
 
             logger.info("Downloading season %s", season)
-            df = fetch_raw_season_csv(season, league)
+            try:
+                df = fetch_raw_season_csv(season, league)
+            except RuntimeError:
+                # football-data.co.uk and its GitHub mirror both failed.
+                # Only worth a fallback for the CURRENT season -- a
+                # completed season failing means something is actually
+                # broken and should surface as an error, not silently
+                # switch sources. TheSportsDB tends to publish a new
+                # season's results before the mirror does (seen live:
+                # the mirror only had a season-2526.csv file, nothing for
+                # 2627, weeks into the 2026-27 season) and this project
+                # already has the fetch/normalize machinery for it from
+                # the other 9 leagues that use it as their primary source.
+                if season != current_season or league not in THESPORTSDB_LEAGUE_IDS:
+                    raise
+                logger.warning(
+                    "Season %s unavailable from football-data.co.uk/mirror -- falling back to TheSportsDB",
+                    season,
+                )
+                df = fetch_raw_thesportsdb_season(league, _current_thesportsdb_season())
+                df["season"] = season  # keep this league's own season-code convention (e.g. "2627")
             df.to_parquet(cache_path, index=False)
             frames.append(df)
     elif source == "thesportsdb":
