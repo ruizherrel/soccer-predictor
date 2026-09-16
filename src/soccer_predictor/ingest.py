@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import time
+import unicodedata
 from pathlib import Path
 
 import numpy as np
@@ -428,21 +429,49 @@ def _current_thesportsdb_season(today: pd.Timestamp | None = None) -> str:
     return f"{today.year}-{today.year + 1}" if today.month >= 8 else f"{today.year - 1}-{today.year}"
 
 
+def _norm_name(s: str) -> str:
+    s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode()
+    return s.lower().strip()
+
+
+# Pairs where football-data.co.uk's abbreviated name and TheSportsDB's full
+# name for the same club share no substring even after accent-stripping
+# (initials, apostrophes, or a genuinely different short form), so the
+# substring check in _names_roughly_match alone misses them. Found by
+# diffing TheSportsDB's current-season (2026-2027) team list for E0/SP1/
+# D1/I1/F1 against each league's own football-data.co.uk team list and
+# manually verifying every gap (2026-09-16) -- a handful of other gaps
+# (Coventry City, Racing de Santander, Elversberg, Le Mans this season)
+# were newly-promoted/returned clubs with no football-data.co.uk history
+# yet at all, not a naming mismatch, and are intentionally not listed here;
+# they'll resolve on their own once a season refresh ingests their matches.
+_KNOWN_NAME_ALIASES: list[tuple[str, str]] = [
+    ("Man City", "Manchester City"),
+    ("Man United", "Manchester United"),
+    ("Nott'm Forest", "Nottingham Forest"),
+    ("Ath Bilbao", "Athletic Bilbao"),
+    ("Ath Madrid", "Atlético Madrid"),
+    ("La Coruna", "Deportivo de A Coruña"),
+    ("Espanol", "Espanyol"),
+    ("M'gladbach", "Borussia Mönchengladbach"),
+    ("Ein Frankfurt", "Eintracht Frankfurt"),
+    ("Paris SG", "Paris Saint-Germain"),
+]
+_NORMALIZED_NAME_ALIASES = frozenset(frozenset((_norm_name(a), _norm_name(b))) for a, b in _KNOWN_NAME_ALIASES)
+
+
 def _names_roughly_match(name_a: str, name_b: str) -> bool:
-    """True only when one (accent-stripped, lowercased) name is a
-    substring of the other. Deliberately conservative: no token splitting
-    or fuzzy distance, since e.g. "Real Madrid" and "Real Sociedad" share a
-    token but are obviously different clubs — a false "next fixture" match
-    is worse than missing a real one, which just falls back to the
-    hypothetical-matchup framing the app already uses."""
-    import unicodedata
-
-    def norm(s: str) -> str:
-        s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode()
-        return s.lower().strip()
-
-    a, b = norm(name_a), norm(name_b)
-    return a == b or a in b or b in a
+    """True when one (accent-stripped, lowercased) name is a substring of
+    the other, or the pair is a known cross-source alias (see
+    _KNOWN_NAME_ALIASES). Deliberately conservative otherwise: no token
+    splitting or fuzzy distance, since e.g. "Real Madrid" and "Real
+    Sociedad" share a token but are obviously different clubs — a false
+    "next fixture" match is worse than missing a real one, which just
+    falls back to the hypothetical-matchup framing the app already uses."""
+    a, b = _norm_name(name_a), _norm_name(name_b)
+    if a == b or a in b or b in a:
+        return True
+    return frozenset((a, b)) in _NORMALIZED_NAME_ALIASES
 
 
 def fetch_upcoming_fixtures(league: str, rounds_ahead: int = 2) -> pd.DataFrame:

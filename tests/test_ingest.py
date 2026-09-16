@@ -16,6 +16,20 @@ def test_names_roughly_match_rejects_different_clubs_sharing_a_word():
     assert not _names_roughly_match("Real Madrid", "Real Sociedad")
 
 
+def test_names_roughly_match_known_cross_source_aliases():
+    # football-data.co.uk's abbreviation vs. TheSportsDB's full name --
+    # no shared substring even after accent-stripping, so these only match
+    # via the explicit _KNOWN_NAME_ALIASES table, not the substring check.
+    assert _names_roughly_match("Ath Madrid", "Atlético Madrid")
+    assert _names_roughly_match("Atlético Madrid", "Ath Madrid")  # order shouldn't matter
+    assert _names_roughly_match("Man United", "Manchester United")
+    assert _names_roughly_match("Nott'm Forest", "Nottingham Forest")
+
+
+def test_names_roughly_match_does_not_alias_unrelated_names():
+    assert not _names_roughly_match("Ath Madrid", "Manchester United")
+
+
 def test_find_upcoming_fixture_matches_either_order():
     fixtures = pd.DataFrame(
         {

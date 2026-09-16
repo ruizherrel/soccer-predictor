@@ -96,9 +96,31 @@ TEAM_NICKNAMES: dict[str, str] = {
 }
 
 
+# football-data.co.uk stores La Liga team names in an abbreviated/English
+# style (its own internal convention, stable across seasons) rather than
+# the full Spanish names fans actually use -- shown in full here purely
+# for display. Doesn't affect matching against TheSportsDB fixtures or
+# odds, which is fixed separately in ingest._KNOWN_NAME_ALIASES (a
+# different problem: cross-source lookup, not display).
+TEAM_DISPLAY_NAMES: dict[str, str] = {
+    "Ath Madrid": "Atlético de Madrid",
+    "Ath Bilbao": "Athletic Bilbao",
+    "Alaves": "Deportivo Alavés",
+    "Betis": "Real Betis",
+    "Celta": "Celta de Vigo",
+    "Espanol": "Espanyol",
+    "La Coruna": "Deportivo de A Coruña",
+    "Sociedad": "Real Sociedad",
+    "Sp Gijon": "Sporting de Gijón",
+    "Valladolid": "Real Valladolid",
+    "Vallecano": "Rayo Vallecano",
+}
+
+
 def _team_display_name(name: str) -> str:
+    base = TEAM_DISPLAY_NAMES.get(name, name)
     nickname = TEAM_NICKNAMES.get(name)
-    return f"{name} ({nickname})" if nickname else name
+    return f"{base} ({nickname})" if nickname else base
 
 
 # Below this market-implied probability, this model has been observed
@@ -229,6 +251,15 @@ if home_team == away_team:
     st.warning("Elige dos equipos distintos.")
     st.stop()
 
+# Display-only names (e.g. "Atlético de Madrid" instead of
+# football-data.co.uk's internal "Ath Madrid") for every user-facing label
+# below. home_team/away_team themselves stay as the raw dropdown values
+# everywhere else in this file -- every data lookup (build_live_features,
+# find_upcoming_fixture, find_match_odds, score_grid) depends on matching
+# the exact strings the underlying data/model actually use.
+home_display = _team_display_name(home_team)
+away_display = _team_display_name(away_team)
+
 if not config.model_path(league).exists():
     st.error(
         "No se encontró un modelo entrenado para esta liga. Corre primero "
@@ -274,14 +305,14 @@ if st.button("Predecir", type="primary"):
         # shown since it would always read ~0%.
         st.subheader("Probabilidad de victoria")
         m1, m2 = st.columns(2)
-        m1.metric(f"Gana {home_team}", f"{p_home:.1%}")
-        m2.metric(f"Gana {away_team}", f"{p_away:.1%}")
+        m1.metric(f"Gana {home_display}", f"{p_home:.1%}")
+        m2.metric(f"Gana {away_display}", f"{p_away:.1%}")
     else:
         st.subheader("Probabilidades 1X2")
         m1, m2, m3 = st.columns(3)
-        m1.metric(f"Gana {home_team}", f"{p_home:.1%}")
+        m1.metric(f"Gana {home_display}", f"{p_home:.1%}")
         m2.metric("Empate", f"{p_draw:.1%}")
-        m3.metric(f"Gana {away_team}", f"{p_away:.1%}")
+        m3.metric(f"Gana {away_display}", f"{p_away:.1%}")
 
         # Draw being the single most-likely outcome (beating both home and
         # away) is genuinely rare in this model — checked empirically across
@@ -300,11 +331,11 @@ if st.button("Predecir", type="primary"):
             )
 
     if is_baseball:
-        bar_x = [f"Gana {home_team}", f"Gana {away_team}"]
+        bar_x = [f"Gana {home_display}", f"Gana {away_display}"]
         bar_y = [p_home, p_away]
         bar_colors = ["#2ca02c", "#d62728"]
     else:
-        bar_x = [f"Gana {home_team}", "Empate", f"Gana {away_team}"]
+        bar_x = [f"Gana {home_display}", "Empate", f"Gana {away_display}"]
         bar_y = [p_home, p_draw, p_away]
         bar_colors = ["#2ca02c", "#7f7f7f", "#d62728"]
 
@@ -321,7 +352,7 @@ if st.button("Predecir", type="primary"):
     st.plotly_chart(fig_bar, width="stretch")
 
     with st.expander("🔍 ¿Por qué esta predicción?"):
-        outcome_names = [away_team, "Empate", home_team]  # CLASS_ORDER = (away, draw, home)
+        outcome_names = [away_display, "Empate", home_display]  # CLASS_ORDER = (away, draw, home)
         predicted_idx = int(np.argmax(probs))
         predicted_label = outcome_names[predicted_idx]
 
@@ -331,7 +362,7 @@ if st.button("Predecir", type="primary"):
 
         imp_df = pd.DataFrame(
             {
-                "label": [_feature_label(c, home_team, away_team, unit) for c in feature_columns],
+                "label": [_feature_label(c, home_display, away_display, unit) for c in feature_columns],
                 "shap": shap_row,
             }
         ).dropna(subset=["shap"])
@@ -379,7 +410,10 @@ if st.button("Predecir", type="primary"):
                 st.caption("💰 No se encontraron cuotas de mercado para este partido todavía.")
             else:
                 model_prob_by_outcome = {"home": p_home, "draw": p_draw, "away": p_away}
-                outcomes = [("home", home_team, match_odds["odds_home"]), ("away", away_team, match_odds["odds_away"])]
+                outcomes = [
+                    ("home", home_display, match_odds["odds_home"]),
+                    ("away", away_display, match_odds["odds_away"]),
+                ]
                 if not is_baseball:
                     outcomes.insert(1, ("draw", "Empate", match_odds["odds_draw"]))
 
@@ -494,11 +528,11 @@ if st.button("Predecir", type="primary"):
         )
     )
     fig_heat.update_layout(
-        xaxis_title=f"{unit} {away_team}",
-        yaxis_title=f"{unit} {home_team}",
+        xaxis_title=f"{unit} {away_display}",
+        yaxis_title=f"{unit} {home_display}",
         height=450,
     )
     st.plotly_chart(fig_heat, width="stretch")
 
     top_idx = np.unravel_index(np.argmax(grid), grid.shape)
-    st.caption(f"Marcador más probable: {home_team} {top_idx[0]} - {top_idx[1]} {away_team}")
+    st.caption(f"Marcador más probable: {home_display} {top_idx[0]} - {top_idx[1]} {away_display}")
