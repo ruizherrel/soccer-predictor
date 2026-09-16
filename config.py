@@ -152,7 +152,7 @@ LEAGUES = {
 # First two seasons are only used to warm up Elo/Pi ratings and rolling
 # form; backtesting only scores seasons from WARMUP_SEASONS onward. Shared
 # by every league with source == "football-data".
-SEASONS = ["1617", "1718", "1819", "1920", "2021", "2122", "2223", "2324", "2425", "2526"]
+SEASONS = ["1617", "1718", "1819", "1920", "2021", "2122", "2223", "2324", "2425", "2526", "2627"]
 WARMUP_SEASONS = 2
 
 
